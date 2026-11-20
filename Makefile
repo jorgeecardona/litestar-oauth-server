@@ -1,4 +1,4 @@
-# litestar-oauth -- human task verbs. These are thin aliases: the CI-graded tasks
+# litestar-oauth-server -- human task verbs. These are thin aliases: the CI-graded tasks
 # (lint/format-check/typecheck/test/docs/build/version-ahead) delegate to the matching
 # moon task, so the command + its inputs/outputs live in ONE place (moon.yml) and `make`
 # runs exactly what CI runs, with moon's caching. Only the verbs moon has no task for

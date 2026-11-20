@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from litestar_oauth import (
+from litestar_oauth_server import (
     Approval,
     AuthorizationServer,
     OAuthConfig,
@@ -219,7 +219,7 @@ async def test_plain_http_redirect_is_not_registrable(server: AuthorizationServe
 
 @pytest.mark.anyio
 async def test_registration_can_be_disabled(config: OAuthConfig, clock: Clock) -> None:
-    from litestar_oauth import in_memory_stores
+    from litestar_oauth_server import in_memory_stores
 
     closed = AuthorizationServer(
         config=replace(config, registration_enabled=False), stores=in_memory_stores(), now=clock

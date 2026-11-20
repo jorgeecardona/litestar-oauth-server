@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Protocol
 
-from litestar_oauth.models import CodeRecord, OAuthClient, TokenKind, TokenRecord
+from litestar_oauth_server.models import CodeRecord, OAuthClient, TokenKind, TokenRecord
 
 
 class ClientStore(Protocol):

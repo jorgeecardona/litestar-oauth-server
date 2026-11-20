@@ -19,7 +19,7 @@ Only in-memory stores exist. Every host app has to implement `ClientStore`, `Cod
 
 ## Done
 
-An optional extra `litestar-oauth[sqlalchemy]` with tables and stores where each consume is one
+An optional extra `litestar-oauth-server[sqlalchemy]` with tables and stores where each consume is one
 `UPDATE ... WHERE used_at IS NULL RETURNING` or `DELETE ... RETURNING`. A test fires two concurrent
 exchanges of one code against Postgres and asserts that exactly one succeeds.
 

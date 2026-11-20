@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlsplit
 
-from litestar_oauth.models import (
+from litestar_oauth_server.models import (
     Approval,
     AuthorizationRequest,
     CodeRecord,
@@ -43,7 +43,7 @@ from litestar_oauth.models import (
     TokenResponse,
     VerifiedToken,
 )
-from litestar_oauth.stores import Stores
+from litestar_oauth_server.stores import Stores
 
 CODE_CHALLENGE_METHOD = "S256"
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")

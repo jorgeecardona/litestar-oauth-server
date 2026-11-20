@@ -2,14 +2,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from litestar_oauth import (
+from litestar_oauth_server import (
     AuthorizationRequest,
     AuthorizationServer,
     OAuthClient,
     OAuthConfig,
     in_memory_stores,
 )
-from litestar_oauth.server import pkce_challenge
+from litestar_oauth_server.server import pkce_challenge
 
 RESOURCE = "https://api.example.com/mcp"
 VERIFIER = "v" * 64

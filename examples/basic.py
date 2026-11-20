@@ -12,7 +12,7 @@ from typing import Any
 
 from litestar import Litestar, Request, get, post
 
-from litestar_oauth import (
+from litestar_oauth_server import (
     Approval,
     AuthorizationRequest,
     AuthorizationServer,

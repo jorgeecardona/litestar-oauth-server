@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`litestar-oauth` is pre-1.0. Only the latest release on PyPI is supported. Fixes land on `main`
+`litestar-oauth-server` is pre-1.0. Only the latest release on PyPI is supported. Fixes land on `main`
 and ship in the next automatic release; there are no backports.
 
 ## Reporting a vulnerability

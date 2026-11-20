@@ -7,25 +7,25 @@
 set -e
 cd "$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
 
-# Read the single source of truth (src/litestar_oauth/__init__.py's __version__); pyproject's
+# Read the single source of truth (src/litestar_oauth_server/__init__.py's __version__); pyproject's
 # version is dynamic (hatchling derives it from this literal), so it no longer carries a static line.
-V="$(grep -E '^__version__ = "' src/litestar_oauth/__init__.py | head -1 | cut -d'"' -f2)"
-[ -n "$V" ] || { echo "release: could not read __version__ from src/litestar_oauth/__init__.py" >&2; exit 1; }
+V="$(grep -E '^__version__ = "' src/litestar_oauth_server/__init__.py | head -1 | cut -d'"' -f2)"
+[ -n "$V" ] || { echo "release: could not read __version__ from src/litestar_oauth_server/__init__.py" >&2; exit 1; }
 
 # Already on PyPI? Then this version is released; nothing to do.
 if uv run python - "$V" <<'PY'
 import json, sys, urllib.request, urllib.error
 version = sys.argv[1]
 try:
-    data = json.load(urllib.request.urlopen("https://pypi.org/pypi/litestar-oauth/json"))
+    data = json.load(urllib.request.urlopen("https://pypi.org/pypi/litestar-oauth-server/json"))
     sys.exit(0 if version in data["releases"] else 1)
 except Exception:
     sys.exit(1)
 PY
 then
-    echo "release: litestar-oauth $V already on PyPI -- nothing to do"
+    echo "release: litestar-oauth-server $V already on PyPI -- nothing to do"
     exit 0
 fi
 
-echo "release: publishing litestar-oauth $V to PyPI"
+echo "release: publishing litestar-oauth-server $V to PyPI"
 sh scripts/pypi-publish

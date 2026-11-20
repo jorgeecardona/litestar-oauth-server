@@ -31,9 +31,9 @@ fi
 # Did any shipped Python source file change in this range? (src/**/*.py only --
 # notes/docs under src/ are not a code change.)
 if git diff --name-only "$BASE" "$HEAD_REF" -- 'src/' | grep -q '\.py$'; then
-    # Then the __version__ line in src/litestar_oauth/__init__.py -- the single source of truth
+    # Then the __version__ line in src/litestar_oauth_server/__init__.py -- the single source of truth
     # (pyproject reads it via [tool.hatch.version]) -- must have changed in the same range.
-    if git diff "$BASE" "$HEAD_REF" -- src/litestar_oauth/__init__.py | grep -qE '^[+-]__version__ = "'; then
+    if git diff "$BASE" "$HEAD_REF" -- src/litestar_oauth_server/__init__.py | grep -qE '^[+-]__version__ = "'; then
         echo "check-version-bump: OK -- src python changed and version bumped"
         exit 0
     fi

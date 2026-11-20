@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=https://moonrepo.dev/schemas/project.json
 #
-# litestar-oauth — An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata
+# litestar-oauth-server — An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata
 # Single project at the repo root. Every task runs as a system command via `uv run`
 # (see .moon/toolchain.yml for why moon's Python toolchain is not used). CI runs one
 # `moon run :ci` (lint, format-check, typecheck, test, test-floor, build, docs,
 # version-guard, version-ahead) -- or `:release` on main; moon owns all task ordering
 # instead of hand-wired GitLab stages/needs.
-id: 'litestar_oauth'
+id: 'litestar_oauth_server'
 layer: 'library'
 language: 'python'
 

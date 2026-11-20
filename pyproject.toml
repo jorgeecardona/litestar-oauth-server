@@ -1,6 +1,6 @@
 [project]
-name = "litestar-oauth"
-dynamic = ["version"]  # the single source of truth is __version__ in src/litestar_oauth/__init__.py (see [tool.hatch.version])
+name = "litestar-oauth-server"
+dynamic = ["version"]  # the single source of truth is __version__ in src/litestar_oauth_server/__init__.py (see [tool.hatch.version])
 description = "An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,11 +30,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/cardona-oss/litestar-oauth"
-Repository = "https://gitlab.com/cardona-oss/litestar-oauth"
-Documentation = "https://cardona-oss.gitlab.io/litestar-oauth/"
-Changelog = "https://gitlab.com/cardona-oss/litestar-oauth/-/blob/main/CHANGELOG.md"
-Issues = "https://gitlab.com/cardona-oss/litestar-oauth/-/issues"
+Homepage = "https://gitlab.com/cardona-oss/litestar-oauth-server"
+Repository = "https://gitlab.com/cardona-oss/litestar-oauth-server"
+Documentation = "https://cardona-oss.gitlab.io/litestar-oauth-server/"
+Changelog = "https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CHANGELOG.md"
+Issues = "https://gitlab.com/cardona-oss/litestar-oauth-server/-/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -43,10 +43,10 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 # The version lives as __version__ in the package itself; hatchling reads it (by regex, no import) so
 # pyproject and the runtime never disagree. scripts/bump-version rewrites that literal.
-path = "src/litestar_oauth/__init__.py"
+path = "src/litestar_oauth_server/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/litestar_oauth"]
+packages = ["src/litestar_oauth_server"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE"]
@@ -55,7 +55,7 @@ include = ["src", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE"]
 # The version is dynamic (hatchling reads __version__ from the file below), so uv must watch it too:
 # declaring cache-keys REPLACES uv's defaults, so pyproject.toml is listed explicitly alongside it.
 # Without __init__.py here, bumping the version would not trigger an editable reinstall.
-cache-keys = [{ file = "pyproject.toml" }, { file = "src/litestar_oauth/__init__.py" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/litestar_oauth_server/__init__.py" }]
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pyright[nodejs]>=1.1.390", "pytest>=8", "httpx>=0.27"]
@@ -104,7 +104,7 @@ convention = "pep257"
 "examples/**/*.py" = ["INP001"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["litestar_oauth"]
+known-first-party = ["litestar_oauth_server"]
 
 [tool.pyright]
 include = ["src", "tests", "examples"]

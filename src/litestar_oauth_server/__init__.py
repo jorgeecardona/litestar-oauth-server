@@ -1,6 +1,6 @@
 """An OAuth 2.1 authorization server plugin for Litestar."""
 
-from litestar_oauth.models import (
+from litestar_oauth_server.models import (
     Approval,
     AuthorizationRequest,
     CodeRecord,
@@ -13,14 +13,14 @@ from litestar_oauth.models import (
     TokenResponse,
     VerifiedToken,
 )
-from litestar_oauth.plugin import (
+from litestar_oauth_server.plugin import (
     LitestarOAuth,
     bearer_guard,
     protected_resource_metadata_url,
     verified_token,
 )
-from litestar_oauth.server import AuthorizationServer, OAuthConfig
-from litestar_oauth.stores import (
+from litestar_oauth_server.server import AuthorizationServer, OAuthConfig
+from litestar_oauth_server.stores import (
     ClientStore,
     CodeStore,
     Stores,

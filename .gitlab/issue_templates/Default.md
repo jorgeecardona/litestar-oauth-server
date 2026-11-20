@@ -19,6 +19,6 @@ A minimal example and the command:
 
 ## Environment
 
-- `litestar-oauth` version:
+- `litestar-oauth-server` version:
 - Python version:
 - OS:

@@ -1,3 +1,3 @@
 # API reference
 
-::: litestar_oauth
+::: litestar_oauth_server

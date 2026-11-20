@@ -1,7 +1,7 @@
-# Contributing to litestar-oauth
+# Contributing to litestar-oauth-server
 
 Developer and maintainer notes: toolchain, the dev loop, CI, and the release process. (Package
-*users* need none of this — see the [README](README.md) for what litestar-oauth does and how
+*users* need none of this — see the [README](README.md) for what litestar-oauth-server does and how
 to use it.)
 
 ## Contributing with an AI agent
@@ -46,7 +46,7 @@ per-language jobs or hand-wired stages. moon owns task ordering, so run tasks th
 
 ## Versioning
 
-The version lives as `__version__` in `src/litestar_oauth/__init__.py` — the single source of
+The version lives as `__version__` in `src/litestar_oauth_server/__init__.py` — the single source of
 truth, which `pyproject.toml` reads via `[tool.hatch.version]` (its `version` is `dynamic`, so there
 is no second copy to drift). Do not edit it by hand: the pre-commit hook auto-bumps the patch version when anything under `src/` changes,
 and CI's `version-guard` enforces non-bypassably that a `src/` change carries a bump (catching
@@ -73,9 +73,9 @@ upload):
 
 | Field | Value |
 |-------|-------|
-| PyPI Project Name | `litestar-oauth` |
+| PyPI Project Name | `litestar-oauth-server` |
 | Namespace | `cardona-oss` |
-| Project name (repo) | `litestar-oauth` |
+| Project name (repo) | `litestar-oauth-server` |
 | Top-level pipeline file | `.gitlab-ci.yml` |
 | Environment name | `pypi` |
 

@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repo. Humans: read README.md and C
 
 ## Overview
 
-litestar-oauth: An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata.
+litestar-oauth-server: An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata.
 
 Layout: `models.py` (frozen dataclasses, the data model), `stores.py` (storage protocols plus
 in-memory stores), `server.py` (`AuthorizationServer`, all the rules, no HTTP), `plugin.py`
@@ -35,5 +35,5 @@ Design plan for using it in Jorge's products: `../../MCP-PLAN.md`.
 - A token is valid only at its own `resource`; `verify` rejects every other. Do not loosen this.
 - Wire format is snake_case JSON as the RFCs define it, not the camelCase house DTO style.
 - No `dict[str, Any]` for domain data: add a frozen dataclass instead.
-- Version lives as `__version__` in `src/litestar_oauth/__init__.py`; `pyproject.toml` reads it via `[tool.hatch.version]` (`version` is `dynamic`). The pre-commit hook auto-bumps it when `src/` changes. Do not edit versions by hand elsewhere.
+- Version lives as `__version__` in `src/litestar_oauth_server/__init__.py`; `pyproject.toml` reads it via `[tool.hatch.version]` (`version` is `dynamic`). The pre-commit hook auto-bumps it when `src/` changes. Do not edit versions by hand elsewhere.
 - Record follow-ups in `docs/issues/`, not as scattered TODO comments.

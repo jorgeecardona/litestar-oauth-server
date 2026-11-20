@@ -1,8 +1,8 @@
-# litestar-oauth
+# litestar-oauth-server
 
-[![pipeline status](https://gitlab.com/cardona-oss/litestar-oauth/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/litestar-oauth/-/pipelines)
-[![PyPI version](https://img.shields.io/pypi/v/litestar-oauth.svg)](https://pypi.org/project/litestar-oauth/)
-[![Python versions](https://img.shields.io/pypi/pyversions/litestar-oauth.svg)](https://pypi.org/project/litestar-oauth/)
+[![pipeline status](https://gitlab.com/cardona-oss/litestar-oauth-server/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/litestar-oauth-server/-/pipelines)
+[![PyPI version](https://img.shields.io/pypi/v/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
+[![Python versions](https://img.shields.io/pypi/pyversions/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata
@@ -10,7 +10,7 @@ An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration
 ## Install
 
 ```bash
-pip install litestar-oauth
+pip install litestar-oauth-server
 ```
 
 Requires Python 3.12+.
@@ -19,7 +19,7 @@ Requires Python 3.12+.
 
 ```python
 from litestar import Litestar, Request, get
-from litestar_oauth import (
+from litestar_oauth_server import (
     AuthorizationServer, LitestarOAuth, OAuthConfig, bearer_guard, in_memory_stores, verified_token,
 )
 
@@ -47,7 +47,7 @@ Your consent page signs the user in with your own login, then calls
 `server.approve(request, Approval(subject=..., scopes=..., binding=...))` and sends the browser to
 the URL it returns. See `examples/basic.py`.
 
-## Why litestar-oauth
+## Why litestar-oauth-server
 
 Adding "Connect to Claude", a CLI login or a third-party integration to a Litestar API needs an
 OAuth 2.1 authorization server: PKCE, client registration, token and refresh, discovery documents.
@@ -67,10 +67,10 @@ app. It is the server side an MCP connector needs, and it works the same for any
 
 ## Links
 
-- **Documentation:** https://cardona-oss.gitlab.io/litestar-oauth/
-- **Source:** https://gitlab.com/cardona-oss/litestar-oauth
-- **Issues:** https://gitlab.com/cardona-oss/litestar-oauth/-/issues
-- **PyPI:** https://pypi.org/project/litestar-oauth/
+- **Documentation:** https://cardona-oss.gitlab.io/litestar-oauth-server/
+- **Source:** https://gitlab.com/cardona-oss/litestar-oauth-server
+- **Issues:** https://gitlab.com/cardona-oss/litestar-oauth-server/-/issues
+- **PyPI:** https://pypi.org/project/litestar-oauth-server/
 - **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ## Contributing

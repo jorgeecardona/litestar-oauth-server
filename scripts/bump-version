@@ -1,5 +1,5 @@
 #!/bin/sh
-# Bump __version__ in src/litestar_oauth/__init__.py -- the single source of truth that
+# Bump __version__ in src/litestar_oauth_server/__init__.py -- the single source of truth that
 # hatchling reads (pyproject's version is dynamic, via [tool.hatch.version] path) and that the
 # release tag must match.
 #
@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 BUMP_TYPE="${1:-patch}"
-VERSION_FILE="src/litestar_oauth/__init__.py"
+VERSION_FILE="src/litestar_oauth_server/__init__.py"
 
 CURRENT=$(grep -E '^__version__ = "' "$VERSION_FILE" | head -1 | sed -E 's/^__version__ = "([^"]*)".*/\1/')
 if [ -z "$CURRENT" ]; then

@@ -5,12 +5,12 @@ author_email: jorgeecardona@gmail.com
 author_name: Jorge Cardona
 description: 'An OAuth 2.1 authorization server plugin for Litestar: PKCE, client
     registration, token and refresh, with MCP-ready metadata'
-dist_name: litestar-oauth
+dist_name: litestar-oauth-server
 gitlab_group: cardona-oss
 has_examples: true
 has_rust: false
-import_package: litestar_oauth
+import_package: litestar_oauth_server
 license_year: 2026
-project_slug: litestar-oauth
+project_slug: litestar-oauth-server
 python_floor: '3.12'
 test_dir: tests

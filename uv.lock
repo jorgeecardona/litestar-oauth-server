@@ -330,7 +330,7 @@ wheels = [
 ]
 
 [[package]]
-name = "litestar-oauth"
+name = "litestar-oauth-server"
 source = { editable = "." }
 dependencies = [
     { name = "litestar" },

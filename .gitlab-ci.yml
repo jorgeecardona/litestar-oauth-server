@@ -1,4 +1,4 @@
-# litestar-oauth CI/CD -- a single moon-driven job.
+# litestar-oauth-server CI/CD -- a single moon-driven job.
 #
 # proto installs the pinned toolchain (.prototools: moon + uv); then ONE `moon run`
 # orchestrates the whole task graph (lint, typecheck, test, build, docs, version-guard)
@@ -32,7 +32,7 @@ ci:
       aud: pypi
   environment:
     name: pypi
-    url: https://pypi.org/project/litestar-oauth/
+    url: https://pypi.org/project/litestar-oauth-server/
   cache:
     - key:
         files:

@@ -23,8 +23,8 @@ from litestar import Request, Response, get, post
 from litestar.exceptions import NotAuthorizedException
 from litestar.plugins import InitPluginProtocol
 
-from litestar_oauth.models import OAuthError, TokenRequest, VerifiedToken
-from litestar_oauth.server import AuthorizationServer, OAuthConfig, normalize_resource
+from litestar_oauth_server.models import OAuthError, TokenRequest, VerifiedToken
+from litestar_oauth_server.server import AuthorizationServer, OAuthConfig, normalize_resource
 
 if TYPE_CHECKING:
     from litestar.config.app import AppConfig
@@ -36,7 +36,7 @@ type BearerGuard = Callable[[ASGIConnection[Any, Any, Any, Any], BaseRouteHandle
 """A Litestar guard function; pass it in ``guards=[...]``."""
 
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
-_STATE_KEY = "litestar_oauth_token"
+_STATE_KEY = "litestar_oauth_server_token"
 
 
 @dataclass(frozen=True, slots=True)

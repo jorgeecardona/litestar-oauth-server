@@ -6,7 +6,7 @@ import pytest
 from litestar import Litestar, Request, get
 from litestar.testing import TestClient
 
-from litestar_oauth import (
+from litestar_oauth_server import (
     Approval,
     AuthorizationServer,
     LitestarOAuth,
@@ -17,7 +17,7 @@ from litestar_oauth import (
     protected_resource_metadata_url,
     verified_token,
 )
-from litestar_oauth.server import pkce_challenge
+from litestar_oauth_server.server import pkce_challenge
 from tests.conftest import REDIRECT, RESOURCE, VERIFIER
 
 
@@ -49,7 +49,7 @@ def get_token(client: TestClient[Any], server: AuthorizationServer, scopes: tupl
     client_id = registered.json()["client_id"]
     import asyncio
 
-    from litestar_oauth import AuthorizationRequest
+    from litestar_oauth_server import AuthorizationRequest
 
     redirect = asyncio.run(
         server.approve(
