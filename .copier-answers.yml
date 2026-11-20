@@ -1,0 +1,16 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.2.0
+_src_path: _starter
+author_email: jorgeecardona@gmail.com
+author_name: Jorge Cardona
+description: 'An OAuth 2.1 authorization server plugin for Litestar: PKCE, client
+    registration, token and refresh, with MCP-ready metadata'
+dist_name: litestar-oauth
+gitlab_group: cardona-oss
+has_examples: true
+has_rust: false
+import_package: litestar_oauth
+license_year: 2026
+project_slug: litestar-oauth
+python_floor: '3.12'
+test_dir: tests

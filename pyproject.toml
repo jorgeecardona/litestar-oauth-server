@@ -1,0 +1,115 @@
+[project]
+name = "litestar-oauth"
+dynamic = ["version"]  # the single source of truth is __version__ in src/litestar_oauth/__init__.py (see [tool.hatch.version])
+description = "An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jorge Cardona", email = "jorgeecardona@gmail.com" }]
+keywords = ["litestar", "oauth", "oauth2", "pkce", "mcp", "authorization-server", "plugin"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = [
+    "litestar>=2.23",
+]
+
+[project.optional-dependencies]
+# docs are an *extra* (not a uv dependency-group) so Read the Docs can install them via pip
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
+
+[project.urls]
+Homepage = "https://gitlab.com/cardona-oss/litestar-oauth"
+Repository = "https://gitlab.com/cardona-oss/litestar-oauth"
+Documentation = "https://cardona-oss.gitlab.io/litestar-oauth/"
+Changelog = "https://gitlab.com/cardona-oss/litestar-oauth/-/blob/main/CHANGELOG.md"
+Issues = "https://gitlab.com/cardona-oss/litestar-oauth/-/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+# The version lives as __version__ in the package itself; hatchling reads it (by regex, no import) so
+# pyproject and the runtime never disagree. scripts/bump-version rewrites that literal.
+path = "src/litestar_oauth/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/litestar_oauth"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.uv]
+# The version is dynamic (hatchling reads __version__ from the file below), so uv must watch it too:
+# declaring cache-keys REPLACES uv's defaults, so pyproject.toml is listed explicitly alongside it.
+# Without __init__.py here, bumping the version would not trigger an editable reinstall.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/litestar_oauth/__init__.py" }]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pyright[nodejs]>=1.1.390", "pytest>=8", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# The canonical base ignore list shared across the oss/ libraries. E501 (line length) is handled by
+# the formatter; COM812/ISC001 conflict with the formatter; D1/D401 relax docstring presence/mood;
+# TRY003/EM101/EM102 allow inline exception messages; CPY001 drops the copyright-header demand;
+# PLC0415 allows non-top-level imports; TC001/TC002/TC003 don't force type-only import blocks.
+ignore = [
+    "E501",
+    "COM812",
+    "ISC001",
+    "D1",
+    "D401",
+    "TRY003",
+    "EM101",
+    "EM102",
+    "CPY001",
+    "PLC0415",
+    "TC001",
+    "TC002",
+    "TC003",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may assert (S101), use magic values (PLR2004), take unused fixtures (ARG), pass Any to typed
+# calls (ANN401), and group assertions pytest would otherwise split (PT018).
+"tests/**/*.py" = ["S101", "S105", "S106", "PLR2004", "ARG", "ANN401", "PT018"]
+
+# Examples are scripts, not a package.
+"examples/**/*.py" = ["INP001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["litestar_oauth"]
+
+[tool.pyright]
+include = ["src", "tests", "examples"]
+extraPaths = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
