@@ -1,5 +1,6 @@
 site_name: litestar-oauth-server
 site_description: "An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata"
+site_url: https://cardona-oss.gitlab.io/litestar-oauth-server/
 repo_url: https://gitlab.com/cardona-oss/litestar-oauth-server
 repo_name: cardona-oss/litestar-oauth-server
 copyright: MIT &copy; Jorge Cardona
@@ -69,6 +70,14 @@ plugins:
             separate_signature: true
             show_signature_annotations: true
             docstring_section_style: spacy
+  - llmstxt:
+      markdown_description: "An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata."
+      full_output: llms-full.txt
+      sections:
+        Usage documentation:
+          - index.md
+        API reference:
+          - api.md
 
 nav:
   - Home: index.md

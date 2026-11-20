@@ -3,7 +3,7 @@
 [![pipeline status](https://gitlab.com/cardona-oss/litestar-oauth-server/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/litestar-oauth-server/-/pipelines)
 [![PyPI version](https://img.shields.io/pypi/v/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
 [![Python versions](https://img.shields.io/pypi/pyversions/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/LICENSE)
 
 An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata
 
@@ -71,14 +71,14 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - **Source:** https://gitlab.com/cardona-oss/litestar-oauth-server
 - **Issues:** https://gitlab.com/cardona-oss/litestar-oauth-server/-/issues
 - **PyPI:** https://pypi.org/project/litestar-oauth-server/
-- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Changelog:** [CHANGELOG.md](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CHANGELOG.md)
 
 ## Contributing
 
 Developer setup, the dev loop, and the release process live in
-[CONTRIBUTING.md](CONTRIBUTING.md). In short: `uv sync && make install-hooks`, then
+[CONTRIBUTING.md](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CONTRIBUTING.md). In short: `uv sync && make install-hooks`, then
 `make check` runs the same gate CI runs.
 
 ## License
 
-MIT © 2026 Jorge Cardona (see [LICENSE](LICENSE)).
+MIT © 2026 Jorge Cardona (see [LICENSE](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/LICENSE)).
