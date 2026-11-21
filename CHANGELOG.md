@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2]
+
+### Added
+
+- `AuthorizationServer.validate_request`: check an authorization request and return its client, so a
+  consent page never shows or redirects to an unregistered `redirect_uri`.
+- `AuthorizationServer.deny`: the `access_denied` redirect (RFC 6749 section 4.1.2.1) for a user who
+  declines.
+
+## [0.0.1]
+
 ### Added
 
 - Authorization server: authorization code flow with PKCE (S256), refresh token rotation with

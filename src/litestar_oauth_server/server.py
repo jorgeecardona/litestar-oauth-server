@@ -195,11 +195,11 @@ class AuthorizationServer:
             raise OAuthError("invalid_client", "unknown client_id", 404)
         return client
 
-    async def approve(self, request: AuthorizationRequest, approval: Approval) -> str:
-        """Mint a single-use code for an approved request and return the redirect URL.
+    async def validate_request(self, request: AuthorizationRequest) -> OAuthClient:
+        """Check an authorization request and return its client.
 
-        The caller has already authenticated the user and decided ``approval.binding`` (and
-        checked that the user may grant it). This validates the OAuth side.
+        The consent page calls this before it shows anything, so it never shows (or redirects
+        to) a request with an unregistered ``redirect_uri``. ``approve`` and ``deny`` call it too.
         """
         client = await self.stores.clients.get(request.client_id)
         if client is None:
@@ -210,6 +210,25 @@ class AuthorizationServer:
             raise OAuthError("invalid_request", "code_challenge is required (PKCE)")
         if request.code_challenge_method != CODE_CHALLENGE_METHOD:
             raise OAuthError("invalid_request", "only the S256 code_challenge_method is supported")
+        self.resolve_resource(request.resource)
+        return client
+
+    async def deny(self, request: AuthorizationRequest) -> str:
+        """The redirect URL that tells the client the user said no (RFC 6749 section 4.1.2.1)."""
+        await self.validate_request(request)
+        query = {"error": "access_denied"}
+        if request.state:
+            query["state"] = request.state
+        separator = "&" if urlsplit(request.redirect_uri).query else "?"
+        return f"{request.redirect_uri}{separator}{urlencode(query)}"
+
+    async def approve(self, request: AuthorizationRequest, approval: Approval) -> str:
+        """Mint a single-use code for an approved request and return the redirect URL.
+
+        The caller has already authenticated the user and decided ``approval.binding`` (and
+        checked that the user may grant it). This validates the OAuth side.
+        """
+        await self.validate_request(request)
         resource = self.resolve_resource(request.resource)
         scopes = self._check_scopes(approval.scopes)
         plaintext = secrets.token_urlsafe(32)

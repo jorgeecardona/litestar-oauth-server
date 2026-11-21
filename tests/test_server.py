@@ -236,3 +236,26 @@ def test_config_needs_a_resource_and_a_scope() -> None:
         OAuthConfig(issuer="i", authorization_endpoint="a", resources=(), scopes_supported=("s",))
     with pytest.raises(ValueError, match="scopes"):
         OAuthConfig(issuer="i", authorization_endpoint="a", resources=("r",), scopes_supported=())
+
+
+@pytest.mark.anyio
+async def test_deny_redirects_with_access_denied_and_state(server: AuthorizationServer) -> None:
+    client = await registered_client(server)
+    redirect = await server.deny(replace(request_for(client), state="xyz"))
+    query = parse_qs(urlsplit(redirect).query)
+    assert redirect.startswith(REDIRECT)
+    assert query == {"error": ["access_denied"], "state": ["xyz"]}
+
+
+@pytest.mark.anyio
+async def test_deny_refuses_an_unregistered_redirect(server: AuthorizationServer) -> None:
+    client = await registered_client(server)
+    with pytest.raises(OAuthError) as caught:
+        await server.deny(replace(request_for(client), redirect_uri="https://evil.example/cb"))
+    assert caught.value.error == "invalid_request"
+
+
+@pytest.mark.anyio
+async def test_validate_request_returns_the_client(server: AuthorizationServer) -> None:
+    client = await registered_client(server)
+    assert (await server.validate_request(request_for(client))).client_id == client.client_id
