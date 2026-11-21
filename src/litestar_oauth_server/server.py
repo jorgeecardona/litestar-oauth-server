@@ -360,6 +360,7 @@ class AuthorizationServer:
             binding=record.binding,
             scopes=record.scopes,
             client_id=record.client_id,
+            family_id=record.family_id,
             resource=record.resource,
             expires_at=record.expires_at,
         )

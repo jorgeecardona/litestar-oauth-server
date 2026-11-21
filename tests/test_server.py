@@ -259,3 +259,12 @@ async def test_deny_refuses_an_unregistered_redirect(server: AuthorizationServer
 async def test_validate_request_returns_the_client(server: AuthorizationServer) -> None:
     client = await registered_client(server)
     assert (await server.validate_request(request_for(client))).client_id == client.client_id
+
+
+@pytest.mark.anyio
+async def test_a_verified_token_names_its_grant(server: AuthorizationServer) -> None:
+    _, tokens = await issue(server)
+    verified = await server.verify(tokens.access_token, RESOURCE)
+    grants = await server.list_grants("u1")
+    assert verified is not None
+    assert [g.family_id for g in grants] == [verified.family_id]

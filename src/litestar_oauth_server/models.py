@@ -95,12 +95,17 @@ class TokenRecord:
 
 @dataclass(frozen=True, slots=True)
 class VerifiedToken:
-    """The result of checking a bearer token at a resource."""
+    """The result of checking a bearer token at a resource.
+
+    ``family_id`` names the grant the token belongs to (the same id ``list_grants`` and
+    ``revoke_family`` use), so a host can tie what it creates to one connected app.
+    """
 
     subject: str
     binding: str
     scopes: tuple[str, ...]
     client_id: str
+    family_id: str
     resource: str
     expires_at: datetime
 
