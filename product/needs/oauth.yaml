@@ -1,0 +1,97 @@
+who: developer adding OAuth 2.1 to a Litestar API
+
+needs:
+
+  - id: LOS-1
+    text: >
+      When the developer adds LitestarOAuth to a Litestar app, they can run a full authorization
+      code flow with PKCE and receive a bound access token.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#quickstart"}
+    proofs:
+      - "test:tests/test_server.py::test_full_flow_issues_a_token_bound_to_the_resource"
+
+  - id: LOS-2
+    text: >
+      When the developer configures the server, they can register clients dynamically and have
+      plain-HTTP redirects rejected.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_http.py::test_bad_registration_is_an_oauth_error"
+      - "test:tests/test_server.py::test_plain_http_redirect_is_not_registrable"
+      - "test:tests/test_server.py::test_registration_can_be_disabled"
+
+  - id: LOS-3
+    text: >
+      When a client tries to use a PKCE method other than S256, the authorization server rejects
+      the request.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_server.py::test_plain_pkce_is_rejected"
+      - "test:tests/test_server.py::test_wrong_verifier_fails_and_burns_the_code"
+
+  - id: LOS-4
+    text: >
+      When the developer uses refresh tokens, they can rely on single-use rotation and have a
+      reused refresh token revoke its entire family.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_server.py::test_refresh_rotates"
+      - "test:tests/test_server.py::test_reused_refresh_token_revokes_the_family"
+      - "test:tests/test_server.py::test_revoke_ends_the_family"
+
+  - id: LOS-5
+    text: >
+      When a bearer token is presented to a protected endpoint, the developer can read the
+      verified subject, binding, and scopes; a missing or invalid token gets a 401 with
+      WWW-Authenticate pointing to the resource metadata.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#quickstart"}
+    proofs:
+      - "test:tests/test_http.py::test_valid_token_reaches_the_handler_with_its_binding"
+      - "test:tests/test_http.py::test_missing_token_gets_401_with_resource_metadata"
+      - "test:tests/test_http.py::test_bad_token_says_invalid_token"
+
+  - id: LOS-6
+    text: >
+      When the developer configures scopes, the bearer guard enforces them so a read-scoped token
+      cannot reach a write endpoint.
+    must: true
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_http.py::test_read_token_cannot_write"
+      - "test:tests/test_http.py::test_write_token_can_write"
+
+  - id: LOS-7
+    text: >
+      When the developer deploys the plugin, they can get server metadata (RFC 8414) and protected
+      resource metadata (RFC 9728) documents from well-known endpoints.
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_http.py::test_metadata_documents"
+
+  - id: LOS-8
+    text: >
+      When a token is presented to the wrong resource, the authorization server rejects it.
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs:
+      - "test:tests/test_server.py::test_token_is_rejected_at_another_resource"
+
+  - id: LOS-9
+    text: >
+      When the developer stores tokens, they can implement three small protocols against their own
+      database; the library ships an in-memory implementation for tests and development.
+    sources:
+      - {kind: secondary, date: 2026-11-21, locator: "README.md#key-features"}
+    proofs: []

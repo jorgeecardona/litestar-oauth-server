@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -360,6 +360,7 @@ docs = [
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
+    { name = "prodc" },
     { name = "pyright", extra = ["nodejs"] },
     { name = "pytest" },
     { name = "ruff" },
@@ -378,6 +379,7 @@ provides-extras = ["docs"]
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "prodc", specifier = ">=0.11.4,<0.12" },
     { name = "pyright", extras = ["nodejs"], specifier = ">=1.1.390" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
@@ -1003,6 +1005,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/65/19/cc8f17f7778d52a8b930622fc0bb8dd450c1d6d8ed4bdb5b2b7703c85dc4/polyfactory-3.5.0.tar.gz", hash = "sha256:78a1e4cf8f317be7da7c111d661f39db35080ec9c12b8df7c01dfbbc1c17250f", size = 381522, upload-time = "2026-10-21T07:13:31.664Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/bb/8667413181bfac2fee81b6f80710356222bf438df1eff6b3c12ab39480a8/polyfactory-3.5.0-py3-none-any.whl", hash = "sha256:2051105650e82ea7046afbab9ad4a7bf579fb6fd80ef65a51a7feaef3396d278", size = 63644, upload-time = "2026-10-21T07:13:30.009Z" },
+]
+
+[[package]]
+name = "prodc"
+version = "0.11.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/38/83/0b5c292cdd253c449d491dad3164c99ed58415ca25e54740ce06b612d335/prodc-0.11.4.tar.gz", hash = "sha256:ddee9874e9f0a58c72ee144cfaf61bc2921d72e3ef1ccab9dbd9321eb0dd3d49", size = 326376, upload-time = "2026-11-21T11:05:18.412Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/29/b4/9e7af2a660693edd6dd44b02152389cf64c10521f9a19e73d7adc268a90c/prodc-0.11.4-py3-none-any.whl", hash = "sha256:a025c85eb71f4a323fa985cf2df3d52db03d240855db98c56b47c256b683ee8a", size = 222864, upload-time = "2026-11-21T11:05:17.297Z" },
 ]
 
 [[package]]
