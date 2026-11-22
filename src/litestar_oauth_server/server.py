@@ -44,7 +44,7 @@ from litestar_oauth_server.models import (
     TokenResponse,
     VerifiedToken,
 )
-from litestar_oauth_server.stores import Stores
+from litestar_oauth_server.stores import ClientPurge, Stores
 
 CODE_CHALLENGE_METHOD = "S256"
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -109,6 +109,9 @@ class OAuthConfig:
     such as ``("hour", 20)``; ``None`` turns it off (#2). The count is kept in memory by each worker
     process. Behind a proxy the address is the proxy's unless the server reads the forwarded
     headers (for uvicorn, ``--proxy-headers`` with ``--forwarded-allow-ips``).
+
+    ``unused_client_ttl`` is how old a client must be before ``purge_unused_clients`` may delete it
+    when no code or token ever referred to it (#2).
     """
 
     issuer: str
@@ -120,6 +123,7 @@ class OAuthConfig:
     access_token_ttl: timedelta = timedelta(hours=1)
     refresh_token_ttl: timedelta = timedelta(days=30)
     registration_enabled: bool = True
+    unused_client_ttl: timedelta = timedelta(days=30)
     cors_origins: tuple[str, ...] = ()
     register_rate_limit: tuple[Literal["second", "minute", "hour", "day"], int] | None = (
         "hour",
@@ -161,6 +165,21 @@ class AuthorizationServer:
         if not self.config.registration_enabled:
             raise OAuthError("access_denied", "dynamic client registration is disabled", 403)
         return await self.add_client(client_name=client_name, redirect_uris=redirect_uris)
+
+    async def purge_unused_clients(self, older_than: timedelta | None = None) -> int:
+        """Delete clients older than ``older_than`` that no code or token refers to (#2).
+
+        ``older_than`` defaults to ``config.unused_client_ttl``. Returns how many were deleted. The
+        library has no scheduler: call this from your own periodic job. Raises ``TypeError`` when
+        the client store does not implement ``ClientPurge``.
+        """
+        clients = self.stores.clients
+        if not isinstance(clients, ClientPurge):
+            raise TypeError(
+                f"{type(clients).__name__} has no delete_unused(); implement ClientPurge to purge"
+            )
+        age = older_than if older_than is not None else self.config.unused_client_ttl
+        return await clients.delete_unused(self.now() - age)
 
     async def add_client(
         self, *, client_name: str, redirect_uris: tuple[str, ...], client_id: str = ""

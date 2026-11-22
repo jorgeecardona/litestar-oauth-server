@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8]
+
+### Added
+
+- `AuthorizationServer.purge_unused_clients()` and `OAuthConfig.unused_client_ttl` (30 days):
+  delete clients that no code or token refers to. A client store opts in with the new `ClientPurge`
+  protocol (`delete_unused(created_before)`); a store without it raises `TypeError` on purge, and
+  existing stores keep working. The in-memory store implements it (#2).
+
 ## [0.0.7]
 
 ### Changed

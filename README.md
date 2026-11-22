@@ -67,6 +67,9 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - A rate limit on `POST /oauth/register`, per client address: 20 an hour by default
   (`register_rate_limit=("hour", 20)`, or `None` to turn it off). Behind a proxy, make the server
   read the forwarded address first (uvicorn: `--proxy-headers --forwarded-allow-ips`).
+- `await server.purge_unused_clients()` deletes clients older than `unused_client_ttl` (30 days)
+  that no code or token refers to. Run it from your own periodic job. Your client store opts in by
+  implementing `ClientPurge.delete_unused(created_before)`.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`
   work in a package with no web code. The Litestar names load on first use. Litestar is still

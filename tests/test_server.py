@@ -6,12 +6,15 @@ import pytest
 
 from litestar_oauth_server import (
     Approval,
+    AuthorizationRequest,
     AuthorizationServer,
     OAuthConfig,
     OAuthError,
+    Stores,
     TokenRequest,
     TokenResponse,
 )
+from litestar_oauth_server.server import pkce_challenge
 from tests.conftest import REDIRECT, RESOURCE, VERIFIER, Clock, registered_client, request_for
 
 READ = Approval(subject="u1", scopes=("things:read",), binding="company:1")
@@ -268,3 +271,57 @@ async def test_a_verified_token_names_its_grant(server: AuthorizationServer) -> 
     grants = await server.list_grants("u1")
     assert verified is not None
     assert [g.family_id for g in grants] == [verified.family_id]
+
+
+# Purging clients nobody used (#2).
+
+
+async def _register(server: AuthorizationServer, name: str) -> str:
+    client = await server.register_client(client_name=name, redirect_uris=(REDIRECT,))
+    return client.client_id
+
+
+@pytest.mark.anyio
+async def test_purge_deletes_old_unused_clients_only(
+    server: AuthorizationServer, clock: Clock
+) -> None:
+    old_unused = await _register(server, "old-unused")
+    used = await _register(server, "used")
+    await server.approve(
+        AuthorizationRequest(
+            client_id=used,
+            redirect_uri=REDIRECT,
+            code_challenge=pkce_challenge(VERIFIER),
+            code_challenge_method="S256",
+            resource=RESOURCE,
+        ),
+        Approval(subject="u1", scopes=("things:read",)),
+    )
+    clock.advance(timedelta(days=31))
+    young = await _register(server, "young")
+
+    assert await server.purge_unused_clients() == 1
+    with pytest.raises(OAuthError):
+        await server.describe_client(old_unused)
+    assert (await server.describe_client(used)).client_name == "used"
+    assert (await server.describe_client(young)).client_name == "young"
+
+
+@pytest.mark.anyio
+async def test_purge_takes_its_own_age(server: AuthorizationServer, clock: Clock) -> None:
+    await _register(server, "a")
+    clock.advance(timedelta(days=2))
+    assert await server.purge_unused_clients(timedelta(days=3)) == 0
+    assert await server.purge_unused_clients(timedelta(days=1)) == 1
+
+
+@pytest.mark.anyio
+async def test_purge_needs_a_store_that_can_delete(config: OAuthConfig) -> None:
+    from tests.plain_stores import PlainClientStore, PlainCodeStore, PlainTokenStore
+
+    plain = AuthorizationServer(
+        config=config,
+        stores=Stores(clients=PlainClientStore(), codes=PlainCodeStore(), tokens=PlainTokenStore()),
+    )
+    with pytest.raises(TypeError, match="ClientPurge"):
+        await plain.purge_unused_clients()
