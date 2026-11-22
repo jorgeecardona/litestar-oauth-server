@@ -12,11 +12,14 @@ from typing import TYPE_CHECKING
 from litestar_oauth_server.models import (
     Approval,
     AuthorizationRequest,
+    ClientLike,
+    CodeLike,
     CodeRecord,
     GrantSummary,
     OAuthClient,
     OAuthError,
     TokenKind,
+    TokenLike,
     TokenRecord,
     TokenRequest,
     TokenResponse,
@@ -51,13 +54,15 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "0.0.6"  # the single source of truth; pyproject reads it via [tool.hatch.version]
+__version__ = "0.0.7"  # the single source of truth; pyproject reads it via [tool.hatch.version]
 
 __all__ = [
     "Approval",
     "AuthorizationRequest",
     "AuthorizationServer",
+    "ClientLike",
     "ClientStore",
+    "CodeLike",
     "CodeRecord",
     "CodeStore",
     "GrantSummary",
@@ -67,6 +72,7 @@ __all__ = [
     "OAuthError",
     "Stores",
     "TokenKind",
+    "TokenLike",
     "TokenRecord",
     "TokenRequest",
     "TokenResponse",

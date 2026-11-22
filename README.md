@@ -71,7 +71,9 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`
   work in a package with no web code. The Litestar names load on first use. Litestar is still
   installed with the package.
-- Frozen dataclasses throughout; storage is three small protocols you implement on your database.
+- Frozen dataclasses throughout. Storage is three small protocols you implement on your database.
+  They take and return any object with the right attributes (`ClientLike`, `CodeLike`,
+  `TokenLike`), so your database layer does not import this package at runtime.
 
 ## Links
 

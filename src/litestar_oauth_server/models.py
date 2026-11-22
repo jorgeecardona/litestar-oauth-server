@@ -15,14 +15,87 @@ Vocabulary:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Protocol, Self
 
 
 class TokenKind(StrEnum):
     ACCESS = "access"
     REFRESH = "refresh"
+
+
+class ClientLike(Protocol):
+    """What a store returns for a client: any object with these attributes.
+
+    A host's own dataclass or ORM row fits, so a store needs no import from this package.
+    """
+
+    @property
+    def client_id(self) -> str: ...
+    @property
+    def client_name(self) -> str: ...
+    @property
+    def redirect_uris(self) -> Sequence[str]: ...
+    @property
+    def created_at(self) -> datetime: ...
+
+
+class CodeLike(Protocol):
+    """What a store holds and returns for an authorization code (see ``CodeRecord``)."""
+
+    @property
+    def code_hash(self) -> str: ...
+    @property
+    def client_id(self) -> str: ...
+    @property
+    def redirect_uri(self) -> str: ...
+    @property
+    def code_challenge(self) -> str: ...
+    @property
+    def subject(self) -> str: ...
+    @property
+    def binding(self) -> str: ...
+    @property
+    def scopes(self) -> Sequence[str]: ...
+    @property
+    def resource(self) -> str: ...
+    @property
+    def expires_at(self) -> datetime: ...
+
+
+class TokenLike(Protocol):
+    """What a store holds and returns for a token (see ``TokenRecord``).
+
+    ``kind`` is the string ``"access"`` or ``"refresh"``: the values of ``TokenKind``.
+    """
+
+    @property
+    def token_hash(self) -> str: ...
+    @property
+    def kind(self) -> str: ...
+    @property
+    def family_id(self) -> str: ...
+    @property
+    def client_id(self) -> str: ...
+    @property
+    def subject(self) -> str: ...
+    @property
+    def binding(self) -> str: ...
+    @property
+    def scopes(self) -> Sequence[str]: ...
+    @property
+    def resource(self) -> str: ...
+    @property
+    def created_at(self) -> datetime: ...
+    @property
+    def expires_at(self) -> datetime: ...
+    @property
+    def used_at(self) -> datetime | None: ...
+    @property
+    def revoked_at(self) -> datetime | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +106,16 @@ class OAuthClient:
     client_name: str
     redirect_uris: tuple[str, ...]
     created_at: datetime
+
+    @classmethod
+    def of(cls, other: ClientLike) -> Self:
+        """Copy any ``ClientLike`` into this package's own record."""
+        return cls(
+            client_id=other.client_id,
+            client_name=other.client_name,
+            redirect_uris=tuple(other.redirect_uris),
+            created_at=other.created_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +157,21 @@ class CodeRecord:
     resource: str
     expires_at: datetime
 
+    @classmethod
+    def of(cls, other: CodeLike) -> Self:
+        """Copy any ``CodeLike`` into this package's own record."""
+        return cls(
+            code_hash=other.code_hash,
+            client_id=other.client_id,
+            redirect_uri=other.redirect_uri,
+            code_challenge=other.code_challenge,
+            subject=other.subject,
+            binding=other.binding,
+            scopes=tuple(other.scopes),
+            resource=other.resource,
+            expires_at=other.expires_at,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class TokenRecord:
@@ -91,6 +189,24 @@ class TokenRecord:
     expires_at: datetime
     used_at: datetime | None = None
     revoked_at: datetime | None = None
+
+    @classmethod
+    def of(cls, other: TokenLike) -> Self:
+        """Copy any ``TokenLike`` into this package's own record."""
+        return cls(
+            token_hash=other.token_hash,
+            kind=TokenKind(other.kind),
+            family_id=other.family_id,
+            client_id=other.client_id,
+            subject=other.subject,
+            binding=other.binding,
+            scopes=tuple(other.scopes),
+            resource=other.resource,
+            created_at=other.created_at,
+            expires_at=other.expires_at,
+            used_at=other.used_at,
+            revoked_at=other.revoked_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)

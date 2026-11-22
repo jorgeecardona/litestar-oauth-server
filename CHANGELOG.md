@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7]
+
+### Changed
+
+- The store protocols take and return `ClientLike`, `CodeLike` and `TokenLike`: any object with
+  those attributes (a host's dataclass or ORM row). A host implements the three stores without a
+  runtime import from this package. `OAuthClient`, `CodeRecord` and `TokenRecord` still satisfy
+  them, so existing stores keep working. `scopes` may be any sequence and `kind` a plain string
+  (`"access"` or `"refresh"`). `describe_client` and `validate_request` still return `OAuthClient` (#5).
+
 ## [0.0.6]
 
 ### Fixed

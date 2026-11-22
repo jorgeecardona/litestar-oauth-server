@@ -210,7 +210,7 @@ class AuthorizationServer:
         client = await self.stores.clients.get(client_id)
         if client is None:
             raise OAuthError("invalid_client", "unknown client_id", 404)
-        return client
+        return OAuthClient.of(client)
 
     async def validate_request(self, request: AuthorizationRequest) -> OAuthClient:
         """Check an authorization request and return its client.
@@ -228,7 +228,7 @@ class AuthorizationServer:
         if request.code_challenge_method != CODE_CHALLENGE_METHOD:
             raise OAuthError("invalid_request", "only the S256 code_challenge_method is supported")
         self.resolve_resource(request.resource)
-        return client
+        return OAuthClient.of(client)
 
     async def deny(self, request: AuthorizationRequest) -> str:
         """The redirect URL that tells the client the user said no (RFC 6749 section 4.1.2.1)."""
@@ -297,7 +297,7 @@ class AuthorizationServer:
                 client_id=record.client_id,
                 subject=record.subject,
                 binding=record.binding,
-                scopes=record.scopes,
+                scopes=tuple(record.scopes),
                 resource=record.resource,
             )
         )
@@ -310,7 +310,7 @@ class AuthorizationServer:
         record = await self.stores.tokens.consume_refresh(token_hash, now)
         if record is None:
             seen = await self.stores.tokens.get(token_hash)
-            if seen is not None and seen.kind is TokenKind.REFRESH and seen.used_at is not None:
+            if seen is not None and seen.kind == TokenKind.REFRESH and seen.used_at is not None:
                 # A rotated token came back: assume theft, end the whole chain.
                 await self.stores.tokens.revoke_family(seen.family_id, now)
             raise OAuthError("invalid_grant", "unknown, expired, revoked or already used token")
@@ -326,7 +326,7 @@ class AuthorizationServer:
                 client_id=record.client_id,
                 subject=record.subject,
                 binding=record.binding,
-                scopes=record.scopes,
+                scopes=tuple(record.scopes),
                 resource=record.resource,
             )
         )
@@ -366,7 +366,7 @@ class AuthorizationServer:
     async def verify(self, token: str, resource: str) -> VerifiedToken | None:
         """Check a bearer token for ``resource``. ``None`` means reject with 401."""
         record = await self.stores.tokens.get(hash_secret(token))
-        if record is None or record.kind is not TokenKind.ACCESS:
+        if record is None or record.kind != TokenKind.ACCESS:
             return None
         if record.revoked_at is not None or record.expires_at < self.now():
             return None
@@ -375,7 +375,7 @@ class AuthorizationServer:
         return VerifiedToken(
             subject=record.subject,
             binding=record.binding,
-            scopes=record.scopes,
+            scopes=tuple(record.scopes),
             client_id=record.client_id,
             family_id=record.family_id,
             resource=record.resource,
@@ -406,7 +406,7 @@ class AuthorizationServer:
                     client_id=record.client_id,
                     client_name=client.client_name if client is not None else record.client_id,
                     binding=record.binding,
-                    scopes=record.scopes,
+                    scopes=tuple(record.scopes),
                     resource=record.resource,
                     created_at=record.created_at,
                 )
