@@ -13,13 +13,15 @@ The consent page and its approve endpoint stay in the host app, because the host
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
 import msgspec
-from litestar import Request, Response, get, post
+from litestar import Request, Response, get, post, route
+from litestar.datastructures import Headers, MutableScopeHeaders
 from litestar.exceptions import NotAuthorizedException
 from litestar.plugins import InitPluginProtocol
 
@@ -31,11 +33,15 @@ if TYPE_CHECKING:
     from litestar.connection import ASGIConnection
     from litestar.handlers import HTTPRouteHandler
     from litestar.handlers.base import BaseRouteHandler
+    from litestar.types import ASGIApp, Message, Receive, Scope, Send
 
 type BearerGuard = Callable[[ASGIConnection[Any, Any, Any, Any], BaseRouteHandler], Awaitable[None]]
 """A Litestar guard function; pass it in ``guards=[...]``."""
 
+logger = logging.getLogger("litestar_oauth_server")
+
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+_PREFLIGHT_MAX_AGE = "600"
 _STATE_KEY = "litestar_oauth_server_token"
 
 
@@ -110,10 +116,98 @@ def _first(form: dict[str, list[str]], key: str) -> str:
     return values[0] if values else ""
 
 
-def _protected_resource_handler(config: OAuthConfig, resource: str) -> HTTPRouteHandler:
+def _cors_headers(origins: tuple[str, ...], origin: str) -> dict[str, str]:
+    """The headers that let ``origin`` read a response, or none when it is not listed."""
+    if "*" in origins:
+        return {"Access-Control-Allow-Origin": "*"}
+    if origin and origin in origins:
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return {}
+
+
+def _cors_middleware(origins: tuple[str, ...]) -> list[Any]:
+    """The middleware list that adds CORS headers to the handlers it wraps; empty without origins."""
+    return [_cors_factory(origins)] if origins else []
+
+
+def _cors_factory(origins: tuple[str, ...]) -> Callable[[ASGIApp], ASGIApp]:
+
+    def factory(app: ASGIApp) -> ASGIApp:
+        async def cors(scope: Scope, receive: Receive, send: Send) -> None:
+            origin = Headers.from_scope(scope).get("origin", "")
+
+            async def send_with_cors(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    message.setdefault("headers", [])
+                    headers = MutableScopeHeaders.from_message(message)
+                    for name, value in _cors_headers(origins, origin).items():
+                        headers[name] = value
+                await send(message)
+
+            await app(scope, receive, send_with_cors)
+
+        return cors
+
+    return factory
+
+
+def _preflight_handler(
+    path: str, methods: tuple[str, ...], origins: tuple[str, ...]
+) -> HTTPRouteHandler:
+    """Answer the CORS preflight for one OAuth path; 204 without headers for an unlisted origin."""
+
+    @route(
+        path,
+        http_method="OPTIONS",
+        status_code=204,
+        sync_to_thread=False,
+        include_in_schema=False,
+        name=f"oauth_preflight:{path}",
+    )
+    def preflight(request: Request[Any, Any, Any]) -> Response[None]:
+        headers = _cors_headers(origins, request.headers.get("origin", ""))
+        if headers:
+            requested = request.headers.get("access-control-request-headers", "")
+            headers["Access-Control-Allow-Methods"] = ", ".join((*methods, "OPTIONS"))
+            headers["Access-Control-Allow-Headers"] = requested or "content-type"
+            headers["Access-Control-Max-Age"] = _PREFLIGHT_MAX_AGE
+        return Response(None, status_code=204, headers=headers)
+
+    return preflight
+
+
+def _with_preflight(
+    handlers: list[HTTPRouteHandler], origins: tuple[str, ...]
+) -> list[HTTPRouteHandler]:
+    """``handlers`` plus one preflight handler per path, listing the methods that path allows.
+
+    The preflight handlers come first: a route made from a GET alone gets Litestar's own OPTIONS
+    handler, and a second OPTIONS handler for the same path is then refused.
+    """
+    if not origins:
+        return handlers
+    methods_by_path: dict[str, tuple[str, ...]] = {}
+    for handler in handlers:
+        for path in handler.paths:
+            methods_by_path[path] = tuple(sorted(handler.http_methods))
+    preflights = [
+        _preflight_handler(path, methods, origins) for path, methods in methods_by_path.items()
+    ]
+    return [*preflights, *handlers]
+
+
+def _protected_resource_handler(
+    config: OAuthConfig, resource: str, middleware: list[Any]
+) -> HTTPRouteHandler:
     path = urlsplit(protected_resource_metadata_url(resource)).path
 
-    @get(path, sync_to_thread=False, tags=["oauth"], name=f"oauth_protected_resource:{path}")
+    @get(
+        path,
+        sync_to_thread=False,
+        tags=["oauth"],
+        name=f"oauth_protected_resource:{path}",
+        middleware=middleware,
+    )
     def handler() -> ProtectedResourceMetadata:
         return ProtectedResourceMetadata(
             resource=normalize_resource(resource),
@@ -126,12 +220,26 @@ def _protected_resource_handler(config: OAuthConfig, resource: str) -> HTTPRoute
     return handler
 
 
-def build_route_handlers(server: AuthorizationServer) -> list[HTTPRouteHandler]:
-    """The OAuth route handlers for ``server``. ``LitestarOAuth`` registers them."""
+def build_route_handlers(
+    server: AuthorizationServer, *, cors: bool = True
+) -> list[HTTPRouteHandler]:
+    """The OAuth route handlers for ``server``. ``LitestarOAuth`` registers them.
+
+    With ``cors`` true and ``config.cors_origins`` set, each route also answers CORS, and each path
+    gets a preflight handler. ``LitestarOAuth`` passes false when the app has its own
+    ``cors_config``.
+    """
     config = server.config
     issuer = config.issuer.rstrip("/")
+    origins = config.cors_origins if cors else ()
+    middleware = _cors_middleware(origins)
 
-    @get("/.well-known/oauth-authorization-server", sync_to_thread=False, tags=["oauth"])
+    @get(
+        "/.well-known/oauth-authorization-server",
+        sync_to_thread=False,
+        tags=["oauth"],
+        middleware=middleware,
+    )
     def authorization_server_metadata() -> AuthorizationServerMetadata:
         return AuthorizationServerMetadata(
             issuer=config.issuer,
@@ -148,7 +256,7 @@ def build_route_handlers(server: AuthorizationServer) -> list[HTTPRouteHandler]:
             scopes_supported=config.scopes_supported,
         )
 
-    @post("/oauth/register", status_code=201, tags=["oauth"])
+    @post("/oauth/register", status_code=201, tags=["oauth"], middleware=middleware)
     async def register(request: Request[Any, Any, Any]) -> Response[Any]:
         try:
             body = msgspec.json.decode(await request.body(), type=_RegisterRequest)
@@ -176,7 +284,7 @@ def build_route_handlers(server: AuthorizationServer) -> list[HTTPRouteHandler]:
             headers=_NO_STORE,
         )
 
-    @post("/oauth/token", status_code=200, tags=["oauth"])
+    @post("/oauth/token", status_code=200, tags=["oauth"], middleware=middleware)
     async def token(request: Request[Any, Any, Any]) -> Response[Any]:
         # RFC 6749 section 4.1.3: urlencoded. Parsed by hand so every failure is an OAuth error
         # object and never a framework validation page.
@@ -196,7 +304,7 @@ def build_route_handlers(server: AuthorizationServer) -> list[HTTPRouteHandler]:
             return _error_response(exc)
         return Response(issued, status_code=200, media_type="application/json", headers=_NO_STORE)
 
-    @post("/oauth/revoke", status_code=200, tags=["oauth"])
+    @post("/oauth/revoke", status_code=200, tags=["oauth"], middleware=middleware)
     async def revoke(request: Request[Any, Any, Any]) -> Response[None]:
         form = parse_qs((await request.body()).decode(errors="replace"))
         value = _first(form, "token")
@@ -207,8 +315,8 @@ def build_route_handlers(server: AuthorizationServer) -> list[HTTPRouteHandler]:
     handlers: list[HTTPRouteHandler] = [authorization_server_metadata, token, revoke]
     if config.registration_enabled:
         handlers.append(register)
-    handlers.extend(_protected_resource_handler(config, r) for r in config.resources)
-    return handlers
+    handlers.extend(_protected_resource_handler(config, r, middleware) for r in config.resources)
+    return _with_preflight(handlers, origins)
 
 
 @dataclass(eq=False, slots=True)
@@ -218,7 +326,13 @@ class LitestarOAuth(InitPluginProtocol):
     server: AuthorizationServer
 
     def on_app_init(self, app_config: AppConfig) -> AppConfig:
-        app_config.route_handlers.extend(build_route_handlers(self.server))
+        own_cors = app_config.cors_config is not None
+        if own_cors and self.server.config.cors_origins:
+            logger.warning(
+                "OAuthConfig.cors_origins is ignored: the app has its own cors_config, "
+                "which answers first. Add the origins to that list."
+            )
+        app_config.route_handlers.extend(build_route_handlers(self.server, cors=not own_cors))
         return app_config
 
 

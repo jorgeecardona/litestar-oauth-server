@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4]
+
+### Added
+
+- `OAuthConfig.cors_origins`: browser origins allowed to call the OAuth routes (`"*"` for any).
+  The plugin answers the preflight and sets `Access-Control-Allow-Origin` on those routes only.
+  It does nothing when the app has its own `cors_config`: Litestar's CORS middleware answers
+  first, so add the origins to that list (#1).
+
 ## [0.0.3]
 
 ### Added

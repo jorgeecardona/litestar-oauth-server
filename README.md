@@ -62,6 +62,8 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - A `binding` on every token: the tenant chosen on the consent screen. The token never crosses it.
 - Narrow scopes: the user approves a subset of what the client asked for (read-only first).
 - Code and refresh token are single use; a reused refresh token revokes its whole family.
+- Optional CORS on the OAuth routes only: `OAuthConfig(cors_origins=("https://inspector.example",))`,
+  so a browser client can reach them. It applies when your app has no `cors_config` of its own.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Frozen dataclasses throughout; storage is three small protocols you implement on your database.
 

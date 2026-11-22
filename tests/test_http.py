@@ -1,9 +1,11 @@
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from litestar import Litestar, Request, get
+from litestar.config.cors import CORSConfig
 from litestar.testing import TestClient
 
 from litestar_oauth_server import (
@@ -175,3 +177,92 @@ def test_revoke_endpoint_kills_the_token(http: tuple[TestClient[Any], Authorizat
     )
     assert revoked.status_code == 200
     assert client.get("/mcp", headers={"authorization": f"Bearer {token}"}).status_code == 401
+
+
+# CORS (#1): cors_origins answers preflight and sets headers on the OAuth routes only.
+
+OAUTH_PATHS = ("/.well-known/oauth-authorization-server", "/oauth/register", "/oauth/token")
+PREFLIGHT = {"Origin": "https://inspector.example.com", "Access-Control-Request-Method": "POST"}
+
+
+def cors_client(
+    config: OAuthConfig, origins: tuple[str, ...], *, own_cors: bool = False
+) -> TestClient[Any]:
+    server = AuthorizationServer(
+        config=replace(config, cors_origins=origins), stores=in_memory_stores()
+    )
+
+    @get("/other", sync_to_thread=False)
+    def other() -> str:
+        return "ok"
+
+    cors_config = CORSConfig(allow_origins=["https://app.example.com"]) if own_cors else None
+    app = Litestar([other], plugins=[LitestarOAuth(server)], cors_config=cors_config)
+    return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [(OAUTH_PATHS[0], "GET"), (OAUTH_PATHS[1], "POST"), (OAUTH_PATHS[2], "POST")],
+)
+def test_listed_origin_passes_the_preflight(config: OAuthConfig, path: str, method: str) -> None:
+    with cors_client(config, ("https://inspector.example.com",)) as client:
+        response = client.options(path, headers=PREFLIGHT)
+    assert response.status_code == 204
+    assert response.headers["access-control-allow-origin"] == "https://inspector.example.com"
+    assert response.headers["vary"] == "Origin"
+    assert method in response.headers["access-control-allow-methods"]
+
+
+def test_preflight_echoes_the_requested_headers(config: OAuthConfig) -> None:
+    headers = {**PREFLIGHT, "Access-Control-Request-Headers": "content-type, authorization"}
+    with cors_client(config, ("*",)) as client:
+        response = client.options("/oauth/token", headers=headers)
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert response.headers["access-control-allow-headers"] == "content-type, authorization"
+
+
+def test_unlisted_origin_gets_no_cors_headers(config: OAuthConfig) -> None:
+    with cors_client(config, ("https://other.example.com",)) as client:
+        preflight = client.options("/oauth/token", headers=PREFLIGHT)
+        actual = client.get(OAUTH_PATHS[0], headers={"Origin": PREFLIGHT["Origin"]})
+    assert preflight.status_code == 204
+    assert "access-control-allow-origin" not in preflight.headers
+    assert actual.status_code == 200
+    assert "access-control-allow-origin" not in actual.headers
+
+
+def test_actual_requests_carry_the_allow_origin_header(config: OAuthConfig) -> None:
+    with cors_client(config, ("https://inspector.example.com",)) as client:
+        metadata = client.get(OAUTH_PATHS[0], headers={"Origin": PREFLIGHT["Origin"]})
+        registered = client.post(
+            "/oauth/register",
+            json={"client_name": "T", "redirect_uris": [REDIRECT]},
+            headers={"Origin": PREFLIGHT["Origin"]},
+        )
+    for response in (metadata, registered):
+        assert response.headers["access-control-allow-origin"] == PREFLIGHT["Origin"]
+
+
+def test_other_routes_stay_closed(config: OAuthConfig) -> None:
+    with cors_client(config, ("*",)) as client:
+        response = client.get("/other", headers={"Origin": PREFLIGHT["Origin"]})
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_no_cors_origins_adds_no_headers(config: OAuthConfig) -> None:
+    with cors_client(config, ()) as client:
+        response = client.get(OAUTH_PATHS[0], headers={"Origin": PREFLIGHT["Origin"]})
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_the_apps_own_cors_config_decides(
+    config: OAuthConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING", logger="litestar_oauth_server"):
+        client = cors_client(config, ("*",), own_cors=True)
+    with client:
+        response = client.options("/oauth/token", headers=PREFLIGHT)
+    assert response.status_code == 400  # Litestar's own CORS middleware, not ours
+    assert "cors_origins is ignored" in caplog.text

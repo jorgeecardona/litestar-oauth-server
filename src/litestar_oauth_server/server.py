@@ -99,6 +99,10 @@ class OAuthConfig:
 
     ``resources`` lists the canonical URIs of the APIs that accept our tokens, for example
     ``("https://api.example.com/mcp",)``. ``authorization_endpoint`` is the host app's consent page.
+
+    ``cors_origins`` lists the browser origins allowed to call the OAuth routes (``"*"`` allows
+    any). Empty means no CORS headers. It applies only when the app has no ``cors_config`` of its
+    own: Litestar's CORS middleware answers first, so the app's list decides (#1).
     """
 
     issuer: str
@@ -110,6 +114,7 @@ class OAuthConfig:
     access_token_ttl: timedelta = timedelta(hours=1)
     refresh_token_ttl: timedelta = timedelta(days=30)
     registration_enabled: bool = True
+    cors_origins: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.resources:
