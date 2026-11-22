@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6]
+
+### Fixed
+
+- `import litestar_oauth_server` no longer imports Litestar. `LitestarOAuth`, `bearer_guard`,
+  `verified_token` and `protected_resource_metadata_url` load it on first use, so a package that
+  holds only the database layer can import the records and stores without it. A test imports them
+  with Litestar blocked (#3).
+
 ## [0.0.5]
 
 ### Added

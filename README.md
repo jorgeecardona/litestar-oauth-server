@@ -68,6 +68,9 @@ app. It is the server side an MCP connector needs, and it works the same for any
   (`register_rate_limit=("hour", 20)`, or `None` to turn it off). Behind a proxy, make the server
   read the forwarded address first (uvicorn: `--proxy-headers --forwarded-allow-ips`).
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
+- Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`
+  work in a package with no web code. The Litestar names load on first use. Litestar is still
+  installed with the package.
 - Frozen dataclasses throughout; storage is three small protocols you implement on your database.
 
 ## Links
