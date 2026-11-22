@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5]
+
+### Added
+
+- `OAuthConfig.register_rate_limit`: a per-address cap on `POST /oauth/register`, on by default at
+  20 an hour; `None` turns it off. The count is kept in memory by each worker process (#2).
+
 ## [0.0.4]
 
 ### Added

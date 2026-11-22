@@ -266,3 +266,53 @@ def test_the_apps_own_cors_config_decides(
         response = client.options("/oauth/token", headers=PREFLIGHT)
     assert response.status_code == 400  # Litestar's own CORS middleware, not ours
     assert "cors_origins is ignored" in caplog.text
+
+
+# Registration rate limit (#2): a per-address cap on POST /oauth/register.
+
+
+def register_client_body() -> dict[str, Any]:
+    return {"client_name": "T", "redirect_uris": [REDIRECT]}
+
+
+def limited_client(config: OAuthConfig, limit: Any) -> TestClient[Any]:
+    server = AuthorizationServer(
+        config=replace(config, register_rate_limit=limit), stores=in_memory_stores()
+    )
+    return TestClient(Litestar([], plugins=[LitestarOAuth(server)]))
+
+
+def test_registration_is_limited_per_address(config: OAuthConfig) -> None:
+    with limited_client(config, ("minute", 2)) as client:
+        codes = [
+            client.post("/oauth/register", json=register_client_body()).status_code
+            for _ in range(3)
+        ]
+    assert codes == [201, 201, 429]
+
+
+def test_the_limit_is_on_by_default(config: OAuthConfig) -> None:
+    assert config.register_rate_limit == ("hour", 20)
+
+
+def test_none_turns_the_limit_off(config: OAuthConfig) -> None:
+    with limited_client(config, None) as client:
+        codes = {
+            client.post("/oauth/register", json=register_client_body()).status_code
+            for _ in range(25)
+        }
+    assert codes == {201}
+
+
+def test_the_limit_covers_registration_only(config: OAuthConfig) -> None:
+    with limited_client(config, ("minute", 1)) as client:
+        client.post("/oauth/register", json=register_client_body())
+        metadata = [client.get(OAUTH_PATHS[0]).status_code for _ in range(3)]
+        token = client.post("/oauth/token", content="grant_type=x").status_code
+    assert metadata == [200, 200, 200]
+    assert token == 400
+
+
+def test_a_count_below_one_is_refused(config: OAuthConfig) -> None:
+    with pytest.raises(ValueError, match="at least 1"):
+        replace(config, register_rate_limit=("hour", 0))

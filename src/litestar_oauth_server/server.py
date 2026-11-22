@@ -28,6 +28,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
 from litestar_oauth_server.models import (
@@ -103,6 +104,11 @@ class OAuthConfig:
     ``cors_origins`` lists the browser origins allowed to call the OAuth routes (``"*"`` allows
     any). Empty means no CORS headers. It applies only when the app has no ``cors_config`` of its
     own: Litestar's CORS middleware answers first, so the app's list decides (#1).
+
+    ``register_rate_limit`` caps ``POST /oauth/register`` per client address, as ``(unit, count)``
+    such as ``("hour", 20)``; ``None`` turns it off (#2). The count is kept in memory by each worker
+    process. Behind a proxy the address is the proxy's unless the server reads the forwarded
+    headers (for uvicorn, ``--proxy-headers`` with ``--forwarded-allow-ips``).
     """
 
     issuer: str
@@ -115,12 +121,18 @@ class OAuthConfig:
     refresh_token_ttl: timedelta = timedelta(days=30)
     registration_enabled: bool = True
     cors_origins: tuple[str, ...] = ()
+    register_rate_limit: tuple[Literal["second", "minute", "hour", "day"], int] | None = (
+        "hour",
+        20,
+    )
 
     def __post_init__(self) -> None:
         if not self.resources:
             raise ValueError("OAuthConfig.resources must list at least one resource")
         if not self.scopes_supported:
             raise ValueError("OAuthConfig.scopes_supported must list at least one scope")
+        if self.register_rate_limit is not None and self.register_rate_limit[1] < 1:
+            raise ValueError("OAuthConfig.register_rate_limit count must be at least 1")
 
 
 @dataclass(frozen=True, slots=True)

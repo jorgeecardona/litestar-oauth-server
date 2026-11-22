@@ -23,6 +23,7 @@ import msgspec
 from litestar import Request, Response, get, post, route
 from litestar.datastructures import Headers, MutableScopeHeaders
 from litestar.exceptions import NotAuthorizedException
+from litestar.middleware.rate_limit import RateLimitConfig
 from litestar.plugins import InitPluginProtocol
 
 from litestar_oauth_server.models import OAuthError, TokenRequest, VerifiedToken
@@ -151,6 +152,13 @@ def _cors_factory(origins: tuple[str, ...]) -> Callable[[ASGIApp], ASGIApp]:
     return factory
 
 
+def _rate_limit_middleware(config: OAuthConfig) -> list[Any]:
+    """The per-address limit on registration (#2); empty when ``register_rate_limit`` is None."""
+    if config.register_rate_limit is None:
+        return []
+    return [RateLimitConfig(rate_limit=config.register_rate_limit).middleware]
+
+
 def _preflight_handler(
     path: str, methods: tuple[str, ...], origins: tuple[str, ...]
 ) -> HTTPRouteHandler:
@@ -256,7 +264,12 @@ def build_route_handlers(
             scopes_supported=config.scopes_supported,
         )
 
-    @post("/oauth/register", status_code=201, tags=["oauth"], middleware=middleware)
+    @post(
+        "/oauth/register",
+        status_code=201,
+        tags=["oauth"],
+        middleware=[*middleware, *_rate_limit_middleware(config)],
+    )
     async def register(request: Request[Any, Any, Any]) -> Response[Any]:
         try:
             body = msgspec.json.decode(await request.body(), type=_RegisterRequest)

@@ -64,6 +64,9 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - Code and refresh token are single use; a reused refresh token revokes its whole family.
 - Optional CORS on the OAuth routes only: `OAuthConfig(cors_origins=("https://inspector.example",))`,
   so a browser client can reach them. It applies when your app has no `cors_config` of its own.
+- A rate limit on `POST /oauth/register`, per client address: 20 an hour by default
+  (`register_rate_limit=("hour", 20)`, or `None` to turn it off). Behind a proxy, make the server
+  read the forwarded address first (uvicorn: `--proxy-headers --forwarded-allow-ips`).
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Frozen dataclasses throughout; storage is three small protocols you implement on your database.
 
