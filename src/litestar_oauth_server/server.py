@@ -44,7 +44,7 @@ from litestar_oauth_server.models import (
     TokenResponse,
     VerifiedToken,
 )
-from litestar_oauth_server.stores import ClientPurge, Stores
+from litestar_oauth_server.stores import ClientAdmin, ClientPurge, Stores
 
 CODE_CHALLENGE_METHOD = "S256"
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
@@ -180,6 +180,34 @@ class AuthorizationServer:
             )
         age = older_than if older_than is not None else self.config.unused_client_ttl
         return await clients.delete_unused(self.now() - age)
+
+    async def list_clients(self, *, limit: int = 100, offset: int = 0) -> tuple[OAuthClient, ...]:
+        """A page of registered clients, newest first, for an admin page (#2).
+
+        Raises ``TypeError`` when the client store does not implement ``ClientAdmin``.
+        """
+        if limit < 1 or offset < 0:
+            raise ValueError("limit must be at least 1 and offset at least 0")
+        page = await self._client_admin().list_clients(limit=limit, offset=offset)
+        return tuple(OAuthClient.of(c) for c in page)
+
+    async def delete_client(self, client_id: str) -> bool:
+        """Delete one client and return whether it existed (#2).
+
+        Tokens already issued to it stay valid until they expire or are revoked. To cut them now,
+        call ``revoke_family`` on the grants (``list_grants`` names them).
+        Raises ``TypeError`` when the client store does not implement ``ClientAdmin``.
+        """
+        return await self._client_admin().delete(client_id)
+
+    def _client_admin(self) -> ClientAdmin:
+        clients = self.stores.clients
+        if not isinstance(clients, ClientAdmin):
+            raise TypeError(
+                f"{type(clients).__name__} has no list_clients() and delete(); "
+                "implement ClientAdmin to list and delete clients"
+            )
+        return clients
 
     async def add_client(
         self, *, client_name: str, redirect_uris: tuple[str, ...], client_id: str = ""

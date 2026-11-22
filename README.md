@@ -70,6 +70,9 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - `await server.purge_unused_clients()` deletes clients older than `unused_client_ttl` (30 days)
   that no code or token refers to. Run it from your own periodic job. Your client store opts in by
   implementing `ClientPurge.delete_unused(created_before)`.
+- `server.list_clients()` and `server.delete_client(client_id)` for an admin page. Your client store
+  opts in by implementing `ClientAdmin`. Tokens already issued to a deleted client stay valid until
+  they expire or are revoked.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`
   work in a package with no web code. The Litestar names load on first use. Litestar is still

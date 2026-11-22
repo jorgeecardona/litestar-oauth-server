@@ -27,6 +27,7 @@ from litestar_oauth_server.models import (
 )
 from litestar_oauth_server.server import AuthorizationServer, OAuthConfig
 from litestar_oauth_server.stores import (
+    ClientAdmin,
     ClientPurge,
     ClientStore,
     CodeStore,
@@ -55,12 +56,13 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "0.0.8"  # the single source of truth; pyproject reads it via [tool.hatch.version]
+__version__ = "0.0.9"  # the single source of truth; pyproject reads it via [tool.hatch.version]
 
 __all__ = [
     "Approval",
     "AuthorizationRequest",
     "AuthorizationServer",
+    "ClientAdmin",
     "ClientLike",
     "ClientPurge",
     "ClientStore",

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.9]
+
+### Added
+
+- `AuthorizationServer.list_clients()` and `delete_client()`: list registered clients (newest
+  first, paged) and delete one. A client store opts in with the new `ClientAdmin` protocol; a store
+  without it raises `TypeError`, and existing stores keep working. The in-memory store implements
+  it. Tokens already issued to a deleted client stay valid until they expire or are revoked (#2).
+
 ## [0.0.8]
 
 ### Added

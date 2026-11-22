@@ -325,3 +325,46 @@ async def test_purge_needs_a_store_that_can_delete(config: OAuthConfig) -> None:
     )
     with pytest.raises(TypeError, match="ClientPurge"):
         await plain.purge_unused_clients()
+
+
+# Listing and deleting clients (#2).
+
+
+@pytest.mark.anyio
+async def test_list_clients_pages_newest_first(server: AuthorizationServer, clock: Clock) -> None:
+    for name in ("a", "b", "c"):
+        await _register(server, name)
+        clock.advance(timedelta(seconds=1))
+    first = await server.list_clients(limit=2)
+    rest = await server.list_clients(limit=2, offset=2)
+    assert [c.client_name for c in first] == ["c", "b"]
+    assert [c.client_name for c in rest] == ["a"]
+
+
+@pytest.mark.anyio
+async def test_delete_client_says_whether_it_existed(server: AuthorizationServer) -> None:
+    client_id = await _register(server, "a")
+    assert await server.delete_client(client_id) is True
+    assert await server.delete_client(client_id) is False
+    with pytest.raises(OAuthError):
+        await server.describe_client(client_id)
+
+
+@pytest.mark.anyio
+async def test_list_clients_refuses_a_bad_page(server: AuthorizationServer) -> None:
+    with pytest.raises(ValueError, match="limit"):
+        await server.list_clients(limit=0)
+
+
+@pytest.mark.anyio
+async def test_admin_needs_a_store_that_can_list_and_delete(config: OAuthConfig) -> None:
+    from tests.plain_stores import PlainClientStore, PlainCodeStore, PlainTokenStore
+
+    plain = AuthorizationServer(
+        config=config,
+        stores=Stores(clients=PlainClientStore(), codes=PlainCodeStore(), tokens=PlainTokenStore()),
+    )
+    with pytest.raises(TypeError, match="ClientAdmin"):
+        await plain.list_clients()
+    with pytest.raises(TypeError, match="ClientAdmin"):
+        await plain.delete_client("x")

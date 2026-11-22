@@ -18,7 +18,7 @@ In SQL both are one ``UPDATE ... WHERE used_at IS NULL RETURNING ...`` (or ``DEL
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -54,6 +54,23 @@ class ClientPurge(Protocol):
         Return how many were deleted. In SQL: ``DELETE ... WHERE created_at < :t AND NOT EXISTS``
         a code and NOT EXISTS a token of the client.
         """
+        ...
+
+
+@runtime_checkable
+class ClientAdmin(Protocol):
+    """Optional: a ``ClientStore`` that can list and delete clients, for an admin page (#2).
+
+    ``AuthorizationServer.list_clients`` and ``delete_client`` call it when the client store has
+    it, and raise ``TypeError`` when it does not.
+    """
+
+    async def list_clients(self, *, limit: int, offset: int) -> Sequence[ClientLike]:
+        """A page of clients, newest first."""
+        ...
+
+    async def delete(self, client_id: str) -> bool:
+        """Delete one client. Return whether it existed."""
         ...
 
 
@@ -106,6 +123,13 @@ class InMemoryClientStore:
 
     async def get(self, client_id: str) -> OAuthClient | None:
         return self._clients.get(client_id)
+
+    async def list_clients(self, *, limit: int, offset: int) -> Sequence[ClientLike]:
+        newest_first = sorted(self._clients.values(), key=lambda c: c.created_at, reverse=True)
+        return newest_first[offset : offset + limit]
+
+    async def delete(self, client_id: str) -> bool:
+        return self._clients.pop(client_id, None) is not None
 
     async def delete_unused(self, created_before: datetime) -> int:
         in_use = self._in_use()
