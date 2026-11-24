@@ -24,6 +24,14 @@ workflow:
     - if: $CI_COMMIT_BRANCH
 
 ci:
+  # The SQLAlchemy store tests need a real Postgres. The runner has no Docker, so they use this
+  # service instead of pytest-servex (see tests/test_sqlalchemy_store.py).
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  variables:
+    POSTGRES_PASSWORD: postgres
+    OAUTH_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@postgres:5432/postgres
   # OIDC Trusted Publishing: GitLab mints a short-lived id_token; scripts/pypi-publish
   # exchanges it for a one-shot PyPI token. The `pypi` environment matches the PyPI
   # publisher config (it is also recorded on non-publishing runs -- cosmetic only).

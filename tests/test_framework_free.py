@@ -56,3 +56,19 @@ def test_an_unknown_name_is_an_attribute_error() -> None:
     import litestar_oauth_server as pkg
 
     assert not hasattr(pkg, "no_such_name")
+
+
+def test_the_base_package_does_not_import_sqlalchemy() -> None:
+    code = """
+        import sys
+        sys.modules["sqlalchemy"] = None  # any `import sqlalchemy` now raises ImportError
+        import litestar_oauth_server
+        import litestar_oauth_server.testing
+        """
+    result = subprocess.run(  # noqa: S603 (a fixed script and our own interpreter)
+        [sys.executable, "-I", "-c", textwrap.dedent(code)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

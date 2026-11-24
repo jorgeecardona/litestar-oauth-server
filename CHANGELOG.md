@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10]
+
+### Added
+
+- Extra `sqlalchemy`: `oauth_tables(metadata)` and `sql_stores(engine, tables)` in
+  `litestar_oauth_server.sqlalchemy`. Stores on Postgres, with the tables on your own `MetaData`.
+  Each method commits in its own transaction. `consume` and `consume_refresh` are one statement
+  each, tested with concurrent exchanges on a real Postgres. `SqlStores.delete_expired(now)`
+  deletes expired codes and tokens. Only Postgres is supported (#7).
+- `litestar_oauth_server.testing.CASES`: a contract test suite for any store, without pytest. It
+  runs on the in-memory stores, on the plain stores of the tests and on the SQL stores (#7).
+
 ## [0.0.9]
 
 ### Added

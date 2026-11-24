@@ -29,9 +29,10 @@ tasks:
 
   # Run the suite against the lowest supported Python in a throwaway isolated env (not .venv),
   # so a feature that quietly needs a newer interpreter is caught at the floor rather than by a
-  # user on 3.12. --with-editable . installs this package; pytest is pulled in too.
+  # user on 3.12. --with-editable . installs this package; pytest and the SQL test dependencies
+  # (the dev group, which this isolated env does not read) are pulled in too.
   test-floor:
-    command: 'uv run --isolated --python 3.12 --with-editable . --with pytest pytest -q'
+    command: 'uv run --isolated --python 3.12 --with-editable . --with pytest --with "sqlalchemy[asyncio]" --with "psycopg[binary]" --with pytest-servex pytest -q'
     inputs: ['src/**/*.py', 'tests/**/*.py', 'pyproject.toml']
 
   build:

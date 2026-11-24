@@ -13,7 +13,11 @@ An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration
 pip install litestar-oauth-server
 ```
 
-Requires Python 3.12+.
+Requires Python 3.12+. For stores on Postgres, add the extra and a Postgres driver:
+
+```bash
+pip install "litestar-oauth-server[sqlalchemy]" "psycopg[binary]"
+```
 
 ## Quickstart
 
@@ -47,6 +51,58 @@ Your consent page signs the user in with your own login, then calls
 `server.approve(request, Approval(subject=..., scopes=..., binding=...))` and sends the browser to
 the URL it returns. See `examples/basic.py`.
 
+## Stores on Postgres
+
+`litestar_oauth_server.sqlalchemy` has ready stores for Postgres (SQLAlchemy 2, async). Steps:
+
+1. Define the tables on your own `MetaData`, so your Alembic sees them. This package ships no
+   migrations.
+2. Build the stores from your `AsyncEngine`.
+
+```python
+from sqlalchemy import MetaData
+from sqlalchemy.ext.asyncio import create_async_engine
+from litestar_oauth_server import AuthorizationServer
+from litestar_oauth_server.sqlalchemy import oauth_tables, sql_stores
+
+metadata = MetaData()  # your app's metadata
+tables = oauth_tables(metadata, prefix="oauth_")  # oauth_clients, oauth_codes, oauth_tokens
+engine = create_async_engine("postgresql+psycopg://user:pass@localhost/app")
+# `config` is the OAuthConfig of the Quickstart
+server = AuthorizationServer(config=config, stores=sql_stores(engine, tables))
+```
+
+Each store method runs in its own transaction and commits. It does not join your session: if your
+code rolled back after a failed exchange, a used authorization code would come back to life.
+`consume` and `consume_refresh` are each one statement (`DELETE ... RETURNING` and
+`UPDATE ... WHERE used_at IS NULL RETURNING`), so two exchanges of one code cannot both succeed.
+
+Only Postgres is supported. `sql_stores` raises `ValueError` for another database. Use
+`in_memory_stores()` in development.
+
+Expired rows are never read again. Delete them from a periodic job, before
+`purge_unused_clients()`:
+
+```python
+await stores.delete_expired(datetime.now(UTC))
+```
+
+## Test your own stores
+
+`litestar_oauth_server.testing.CASES` is a contract suite for any store: a code is consumed once,
+a refresh token is claimed once when two exchanges race, a family is revoked as a whole. It does
+not import pytest. Each case takes an empty `Stores`:
+
+```python
+import pytest
+from litestar_oauth_server.testing import CASES
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("case", CASES, ids=lambda case: case.__name__)
+async def test_my_stores(case):
+    await case(await make_empty_stores())
+```
+
 ## Why litestar-oauth-server
 
 Adding "Connect to Claude", a CLI login or a third-party integration to a Litestar API needs an
@@ -73,6 +129,7 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - `server.list_clients()` and `server.delete_client(client_id)` for an admin page. Your client store
   opts in by implementing `ClientAdmin`. Tokens already issued to a deleted client stay valid until
   they expire or are revoked.
+- Stores on Postgres with SQLAlchemy (extra `sqlalchemy`), and a contract test suite for your own.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`
   work in a package with no web code. The Litestar names load on first use. Litestar is still
