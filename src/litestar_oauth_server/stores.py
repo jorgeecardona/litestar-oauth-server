@@ -27,6 +27,10 @@ from litestar_oauth_server.models import (
     ClientLike,
     CodeLike,
     CodeRecord,
+    DeviceDecision,
+    DeviceLike,
+    DeviceRecord,
+    DeviceStatus,
     OAuthClient,
     TokenKind,
     TokenLike,
@@ -103,11 +107,55 @@ class TokenStore(Protocol):
         ...
 
 
+class DeviceStore(Protocol):
+    """Device authorizations (RFC 8628, #6). Two operations must be atomic, like the code store.
+
+    - ``decide``: move a record from pending to approved or denied once. Two concurrent decisions
+      on one user code must not both succeed.
+    - ``consume_decided``: return the record and delete it in one step, only when it is decided.
+      Two concurrent polls must not both get the approved record, or two token pairs are issued.
+
+    ``user_code`` is unique. In SQL: a unique index, ``UPDATE ... WHERE status = 'pending' AND
+    expires_at > :now RETURNING ...`` and ``DELETE ... WHERE status <> 'pending' RETURNING ...``.
+    """
+
+    async def add(self, record: DeviceLike) -> None: ...
+
+    async def get(self, device_hash: str) -> DeviceLike | None: ...
+
+    async def get_by_user_code(self, user_code: str) -> DeviceLike | None: ...
+
+    async def decide(
+        self, user_code: str, decision: DeviceDecision, now: datetime
+    ) -> DeviceLike | None:
+        """Atomically set the decision of a pending, unexpired record. ``None`` if there is none.
+
+        Store ``decision.status.value`` and the other fields (as ``approved_scopes`` for the
+        scopes). Return the record as it is after the update.
+        """
+        ...
+
+    async def record_poll(self, device_hash: str, now: datetime, interval: int) -> None:
+        """Remember that the client polled at ``now``, and the interval it must keep from now on."""
+        ...
+
+    async def consume_decided(self, device_hash: str) -> DeviceLike | None:
+        """Atomically return and delete the record if it is approved or denied, else ``None``."""
+        ...
+
+    async def delete_expired(self, now: datetime) -> int:
+        """Delete the records that expired before ``now``. Return how many."""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class Stores:
+    """The stores of a server. ``devices`` is only needed for the device grant (#6)."""
+
     clients: ClientStore
     codes: CodeStore
     tokens: TokenStore
+    devices: DeviceStore | None = field(default=None, kw_only=True)
 
 
 @dataclass(slots=True)
@@ -197,11 +245,66 @@ class InMemoryTokenStore:
         return tuple(sorted(found, key=lambda r: r.created_at, reverse=True))
 
 
+@dataclass(slots=True)
+class InMemoryDeviceStore:
+    _records: dict[str, DeviceRecord] = field(default_factory=dict[str, DeviceRecord])
+
+    async def add(self, record: DeviceLike) -> None:
+        self._records[record.device_hash] = DeviceRecord.of(record)
+
+    async def get(self, device_hash: str) -> DeviceRecord | None:
+        return self._records.get(device_hash)
+
+    async def get_by_user_code(self, user_code: str) -> DeviceRecord | None:
+        return next((r for r in self._records.values() if r.user_code == user_code), None)
+
+    async def decide(
+        self, user_code: str, decision: DeviceDecision, now: datetime
+    ) -> DeviceRecord | None:
+        # No await between read and write, so this is atomic on one event loop.
+        record = await self.get_by_user_code(user_code)
+        if record is None or record.status is not DeviceStatus.PENDING or record.expires_at <= now:
+            return None
+        decided = replace(
+            record,
+            status=decision.status,
+            subject=decision.subject,
+            binding=decision.binding,
+            approved_scopes=decision.scopes,
+        )
+        self._records[record.device_hash] = decided
+        return decided
+
+    async def record_poll(self, device_hash: str, now: datetime, interval: int) -> None:
+        record = self._records.get(device_hash)
+        if record is not None:
+            self._records[device_hash] = replace(record, last_poll_at=now, interval=interval)
+
+    async def consume_decided(self, device_hash: str) -> DeviceRecord | None:
+        record = self._records.get(device_hash)
+        if record is None or record.status is DeviceStatus.PENDING:
+            return None
+        return self._records.pop(device_hash)
+
+    async def delete_expired(self, now: datetime) -> int:
+        doomed = [key for key, r in self._records.items() if r.expires_at < now]
+        for key in doomed:
+            del self._records[key]
+        return len(doomed)
+
+    def client_ids(self) -> set[str]:
+        """The clients that a stored device authorization refers to."""
+        return {r.client_id for r in self._records.values()}
+
+
 def in_memory_stores() -> Stores:
     codes = InMemoryCodeStore()
     tokens = InMemoryTokenStore()
+    devices = InMemoryDeviceStore()
 
     def in_use() -> set[str]:
-        return codes.client_ids() | tokens.client_ids()
+        return codes.client_ids() | tokens.client_ids() | devices.client_ids()
 
-    return Stores(clients=InMemoryClientStore(_in_use=in_use), codes=codes, tokens=tokens)
+    return Stores(
+        clients=InMemoryClientStore(_in_use=in_use), codes=codes, tokens=tokens, devices=devices
+    )

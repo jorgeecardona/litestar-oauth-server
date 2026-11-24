@@ -51,11 +51,49 @@ Your consent page signs the user in with your own login, then calls
 `server.approve(request, Approval(subject=..., scopes=..., binding=...))` and sends the browser to
 the URL it returns. See `examples/basic.py`.
 
+## Device login for a CLI (RFC 8628)
+
+Use it when the client cannot open a browser callback: a CLI or a headless agent. The client shows
+a short code, and the user types it on a page of your app. Steps:
+
+1. Set `OAuthConfig(device_verification_uri="https://app.example.com/device")`. This is your page.
+   The stores need `devices` (`in_memory_stores()` and `sql_stores()` have it).
+2. Give the client the device grant. Pre-register it, or let it register itself:
+
+```python
+await server.add_client(
+    client_name="my-cli", grant_types=("urn:ietf:params:oauth:grant-type:device_code", "refresh_token")
+)
+```
+
+A client without this grant gets `unauthorized_client`. Without the rule, anyone who knows the
+`client_id` of your web client could start a device flow under its name. A device-only client needs
+no `redirect_uris`.
+
+3. The client calls `POST /oauth/device_authorization` and polls `POST /oauth/token` with
+   `grant_type=urn:ietf:params:oauth:grant-type:device_code`. The library answers
+   `authorization_pending`, `slow_down`, `access_denied` and `expired_token` as the RFC says.
+4. Your page signs the user in, then calls the server:
+
+```python
+request = await server.describe_device(user_code)  # client name, scopes, resource
+await server.approve_device(user_code, Approval(subject=user.id, scopes=("things:read",), binding=company))
+# or: await server.deny_device(user_code)
+```
+
+Your page must show `request.client_name` and ask the user to confirm that they started the login
+on their own device, also when the code came in `verification_uri_complete`. The library cannot see
+wrong guesses, so **rate-limit the page where users type the code**. A code has 8 letters (about
+34.5 bits) and lives 15 minutes (`device_code_ttl`).
+
+Expired rows pile up on an open endpoint. Call `await server.purge_expired_devices()` from a
+periodic job. After it, an expired device code is answered as unknown (`invalid_grant`).
+
 ## Stores on Postgres
 
 `litestar_oauth_server.sqlalchemy` has ready stores for Postgres (SQLAlchemy 2, async). Steps:
 
-1. Define the tables on your own `MetaData`, so your Alembic sees them. This package ships no
+1. Define the four tables on your own `MetaData`, so your Alembic sees them. This package ships no
    migrations.
 2. Build the stores from your `AsyncEngine`.
 
@@ -129,6 +167,7 @@ app. It is the server side an MCP connector needs, and it works the same for any
 - `server.list_clients()` and `server.delete_client(client_id)` for an admin page. Your client store
   opts in by implementing `ClientAdmin`. Tokens already issued to a deleted client stay valid until
   they expire or are revoked.
+- Device authorization grant (RFC 8628) for CLI and headless login, opt-in for each client.
 - Stores on Postgres with SQLAlchemy (extra `sqlalchemy`), and a contract test suite for your own.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.
 - Importing the package does not import Litestar: the models, the stores and `AuthorizationServer`

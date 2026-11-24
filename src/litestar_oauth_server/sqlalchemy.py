@@ -3,7 +3,7 @@
 Install with ``pip install "litestar-oauth-server[sqlalchemy]"`` and a Postgres driver of your own
 choice (``psycopg`` or ``asyncpg``). The rest of the package does not import SQLAlchemy.
 
-1. Call ``oauth_tables(metadata)`` with your own ``MetaData``. Your Alembic then sees the three
+1. Call ``oauth_tables(metadata)`` with your own ``MetaData``. Your Alembic then sees the four
    tables, and this package ships no migrations.
 2. Call ``sql_stores(engine, tables)`` with an ``AsyncEngine`` to get the stores.
 
@@ -16,11 +16,15 @@ security of the server rests on are each one statement:
 
 - ``SqlCodeStore.consume``: ``DELETE ... RETURNING``;
 - ``SqlTokenStore.consume_refresh``: ``UPDATE ... WHERE used_at IS NULL RETURNING``.
+
+The device grant (#6) has two more: ``SqlDeviceStore.decide`` is one ``UPDATE ... WHERE status =
+'pending' RETURNING`` and ``consume_decided`` is one ``DELETE ... WHERE status <> 'pending'
+RETURNING``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -30,13 +34,16 @@ from sqlalchemy import (
     Column,
     DateTime,
     Index,
+    Integer,
     MetaData,
     String,
     Table,
+    UniqueConstraint,
     delete,
     exists,
     insert,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -45,6 +52,10 @@ from litestar_oauth_server.models import (
     ClientLike,
     CodeLike,
     CodeRecord,
+    DeviceDecision,
+    DeviceLike,
+    DeviceRecord,
+    DeviceStatus,
     OAuthClient,
     TokenKind,
     TokenLike,
@@ -61,18 +72,19 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class OAuthTables:
-    """The three tables, created on the host's ``MetaData`` by ``oauth_tables``."""
+    """The four tables, created on the host's ``MetaData`` by ``oauth_tables``."""
 
     clients: Table
     codes: Table
     tokens: Table
+    devices: Table
 
 
 def oauth_tables(metadata: MetaData, *, prefix: str = "oauth_") -> OAuthTables:
-    """Define the client, code and token tables on ``metadata`` and return them.
+    """Define the client, code, token and device tables on ``metadata`` and return them.
 
     The host's naming conventions and schema apply. Names are ``{prefix}clients``,
-    ``{prefix}codes`` and ``{prefix}tokens``. There is no foreign key from codes or tokens to
+    ``{prefix}codes``, ``{prefix}tokens`` and ``{prefix}devices``. There is no foreign key from codes or tokens to
     clients: deleting a client leaves its tokens valid until they expire.
     """
     clients = Table(
@@ -82,6 +94,13 @@ def oauth_tables(metadata: MetaData, *, prefix: str = "oauth_") -> OAuthTables:
         Column("client_name", String, nullable=False),
         Column("redirect_uris", JSON, nullable=False),
         Column("created_at", DateTime(timezone=True), nullable=False),
+        # What the client may use. A row from before the device grant gets the default.
+        Column(
+            "grant_types",
+            JSON,
+            nullable=False,
+            server_default=text("""'["authorization_code", "refresh_token"]'"""),
+        ),
         Index(f"ix_{prefix}clients_created_at", "created_at"),
     )
     codes = Table(
@@ -120,7 +139,29 @@ def oauth_tables(metadata: MetaData, *, prefix: str = "oauth_") -> OAuthTables:
         Index(f"ix_{prefix}tokens_client_id", "client_id"),
         Index(f"ix_{prefix}tokens_expires_at", "expires_at"),
     )
-    return OAuthTables(clients=clients, codes=codes, tokens=tokens)
+    devices = Table(
+        f"{prefix}devices",
+        metadata,
+        Column("device_hash", String, primary_key=True),
+        Column("user_code", String, nullable=False),
+        Column("client_id", String, nullable=False),
+        Column("scopes", JSON, nullable=False),
+        Column("resource", String, nullable=False),
+        Column("expires_at", DateTime(timezone=True), nullable=False),
+        Column("interval", Integer, nullable=False),
+        Column("last_poll_at", DateTime(timezone=True)),
+        Column("status", String, nullable=False),
+        Column("subject", String, nullable=False, server_default=""),
+        Column("binding", String, nullable=False, server_default=""),
+        Column("approved_scopes", JSON, nullable=False, server_default=text("'[]'")),
+        UniqueConstraint("user_code", name=f"uq_{prefix}devices_user_code"),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'denied')", name=f"ck_{prefix}devices_status"
+        ),
+        Index(f"ix_{prefix}devices_client_id", "client_id"),
+        Index(f"ix_{prefix}devices_expires_at", "expires_at"),
+    )
+    return OAuthTables(clients=clients, codes=codes, tokens=tokens, devices=devices)
 
 
 def _aware(value: datetime, field: str) -> datetime:
@@ -135,6 +176,24 @@ def _client(row: Row[Any]) -> OAuthClient:
         client_name=row.client_name,
         redirect_uris=tuple(row.redirect_uris),
         created_at=row.created_at,
+        grant_types=tuple(row.grant_types),
+    )
+
+
+def _device(row: Row[Any]) -> DeviceRecord:
+    return DeviceRecord(
+        device_hash=row.device_hash,
+        user_code=row.user_code,
+        client_id=row.client_id,
+        scopes=tuple(row.scopes),
+        resource=row.resource,
+        expires_at=row.expires_at,
+        interval=row.interval,
+        last_poll_at=row.last_poll_at,
+        status=DeviceStatus(row.status),
+        subject=row.subject,
+        binding=row.binding,
+        approved_scopes=tuple(row.approved_scopes),
     )
 
 
@@ -183,6 +242,7 @@ class SqlClientStore:
             "client_name": client.client_name,
             "redirect_uris": list(client.redirect_uris),
             "created_at": _aware(client.created_at, "created_at"),
+            "grant_types": list(OAuthClient.of(client).grant_types),
         }
         statement = pg_insert(self.tables.clients).values(values)
         statement = statement.on_conflict_do_update(
@@ -215,12 +275,14 @@ class SqlClientStore:
             return (await conn.execute(statement)).rowcount > 0
 
     async def delete_unused(self, created_before: datetime) -> int:
-        """Delete clients created before ``created_before`` that no code or token refers to."""
+        """Delete clients created before ``created_before`` that no code, token or device refers to."""
         clients, codes, tokens = self.tables.clients, self.tables.codes, self.tables.tokens
+        devices = self.tables.devices
         statement = delete(clients).where(
             clients.c.created_at < created_before,
             ~exists().where(codes.c.client_id == clients.c.client_id),
             ~exists().where(tokens.c.client_id == clients.c.client_id),
+            ~exists().where(devices.c.client_id == clients.c.client_id),
         )
         async with self.engine.begin() as conn:
             return (await conn.execute(statement)).rowcount
@@ -352,20 +414,124 @@ class SqlTokenStore:
 
 
 @dataclass(frozen=True, slots=True)
+class SqlDeviceStore:
+    """Device authorizations in Postgres (RFC 8628)."""
+
+    engine: AsyncEngine
+    tables: OAuthTables
+
+    async def add(self, record: DeviceLike) -> None:
+        """Insert the record. A taken ``user_code`` violates the unique constraint."""
+        statement = insert(self.tables.devices).values(
+            device_hash=record.device_hash,
+            user_code=record.user_code,
+            client_id=record.client_id,
+            scopes=list(record.scopes),
+            resource=record.resource,
+            expires_at=_aware(record.expires_at, "expires_at"),
+            interval=record.interval,
+            last_poll_at=record.last_poll_at,
+            status=DeviceStatus(record.status).value,
+            subject=record.subject,
+            binding=record.binding,
+            approved_scopes=list(record.approved_scopes),
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(statement)
+
+    async def get(self, device_hash: str) -> DeviceRecord | None:
+        devices = self.tables.devices
+        query = select(devices).where(devices.c.device_hash == device_hash)
+        async with self.engine.begin() as conn:
+            row = (await conn.execute(query)).first()
+        return None if row is None else _device(row)
+
+    async def get_by_user_code(self, user_code: str) -> DeviceRecord | None:
+        devices = self.tables.devices
+        async with self.engine.begin() as conn:
+            row = (
+                await conn.execute(select(devices).where(devices.c.user_code == user_code))
+            ).first()
+        return None if row is None else _device(row)
+
+    async def decide(
+        self, user_code: str, decision: DeviceDecision, now: datetime
+    ) -> DeviceRecord | None:
+        """Set the decision of a pending, unexpired record in one ``UPDATE ... RETURNING``."""
+        devices = self.tables.devices
+        statement = (
+            update(devices)
+            .where(
+                devices.c.user_code == user_code,
+                devices.c.status == DeviceStatus.PENDING.value,
+                devices.c.expires_at > now,
+            )
+            .values(
+                status=decision.status.value,
+                subject=decision.subject,
+                binding=decision.binding,
+                approved_scopes=list(decision.scopes),
+            )
+            .returning(*devices.c)
+        )
+        async with self.engine.begin() as conn:
+            row = (await conn.execute(statement)).first()
+        return None if row is None else _device(row)
+
+    async def record_poll(self, device_hash: str, now: datetime, interval: int) -> None:
+        devices = self.tables.devices
+        statement = (
+            update(devices)
+            .where(devices.c.device_hash == device_hash)
+            .values(last_poll_at=now, interval=interval)
+        )
+        async with self.engine.begin() as conn:
+            await conn.execute(statement)
+
+    async def consume_decided(self, device_hash: str) -> DeviceRecord | None:
+        """Delete the record and return it if it is decided, in one ``DELETE ... RETURNING``."""
+        devices = self.tables.devices
+        statement = (
+            delete(devices)
+            .where(
+                devices.c.device_hash == device_hash,
+                devices.c.status != DeviceStatus.PENDING.value,
+            )
+            .returning(*devices.c)
+        )
+        async with self.engine.begin() as conn:
+            row = (await conn.execute(statement)).first()
+        return None if row is None else _device(row)
+
+    async def delete_expired(self, now: datetime) -> int:
+        """Delete the device authorizations that expired before ``now``. Return how many."""
+        devices = self.tables.devices
+        async with self.engine.begin() as conn:
+            return (await conn.execute(delete(devices).where(devices.c.expires_at < now))).rowcount
+
+
+@dataclass(frozen=True, slots=True)
 class SqlStores(Stores):
-    """``Stores`` made of the three SQL stores, with the cleanup of expired rows."""
+    """``Stores`` made of the SQL stores, with the cleanup of expired rows."""
 
     clients: SqlClientStore
     codes: SqlCodeStore
     tokens: SqlTokenStore
+    devices: SqlDeviceStore = field(kw_only=True)
 
     async def delete_expired(self, now: datetime) -> int:
-        """Delete expired codes and tokens. Return how many rows. Run it from a periodic job.
+        """Delete expired codes, tokens and device authorizations. Return how many rows.
+
+        Run it from a periodic job.
 
         Expired rows are never read again, but each one keeps its client from counting as unused.
         Run this before ``purge_unused_clients``.
         """
-        return await self.codes.delete_expired(now) + await self.tokens.delete_expired(now)
+        return (
+            await self.codes.delete_expired(now)
+            + await self.tokens.delete_expired(now)
+            + await self.devices.delete_expired(now)
+        )
 
 
 def sql_stores(engine: AsyncEngine, tables: OAuthTables) -> SqlStores:
@@ -386,4 +552,5 @@ def sql_stores(engine: AsyncEngine, tables: OAuthTables) -> SqlStores:
         clients=SqlClientStore(pinned, tables),
         codes=SqlCodeStore(pinned, tables),
         tokens=SqlTokenStore(pinned, tables),
+        devices=SqlDeviceStore(pinned, tables),
     )

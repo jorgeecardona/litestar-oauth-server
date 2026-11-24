@@ -5,8 +5,9 @@
 - ``GET  /.well-known/oauth-authorization-server``  (RFC 8414)
 - ``GET  /.well-known/oauth-protected-resource[/path]``  (RFC 9728), one per configured resource
 - ``POST /oauth/register``  (RFC 7591), unless registration is disabled
-- ``POST /oauth/token``  (RFC 6749, authorization_code and refresh_token)
+- ``POST /oauth/token``  (RFC 6749: authorization_code, refresh_token, and the device grant)
 - ``POST /oauth/revoke``  (RFC 7009)
+- ``POST /oauth/device_authorization``  (RFC 8628), only when the device grant is on
 
 The consent page and its approve endpoint stay in the host app, because the host owns the login.
 """
@@ -16,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, urlsplit
 
 import msgspec
@@ -26,7 +27,14 @@ from litestar.exceptions import NotAuthorizedException
 from litestar.middleware.rate_limit import RateLimitConfig
 from litestar.plugins import InitPluginProtocol
 
-from litestar_oauth_server.models import OAuthError, TokenRequest, VerifiedToken
+from litestar_oauth_server.models import (
+    GRANT_AUTHORIZATION_CODE,
+    GRANT_DEVICE_CODE,
+    GRANT_REFRESH_TOKEN,
+    OAuthError,
+    TokenRequest,
+    VerifiedToken,
+)
 from litestar_oauth_server.server import AuthorizationServer, OAuthConfig, normalize_resource
 
 if TYPE_CHECKING:
@@ -60,6 +68,7 @@ class AuthorizationServerMetadata:
     token_endpoint_auth_methods_supported: tuple[str, ...]
     scopes_supported: tuple[str, ...]
     registration_endpoint: str | None = None
+    device_authorization_endpoint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +103,7 @@ class _RegisterRequest(msgspec.Struct, kw_only=True):
 
     redirect_uris: tuple[str, ...] = ()
     client_name: str = ""
+    grant_types: tuple[str, ...] = ()
 
 
 def protected_resource_metadata_url(resource: str) -> str:
@@ -152,11 +162,13 @@ def _cors_factory(origins: tuple[str, ...]) -> Callable[[ASGIApp], ASGIApp]:
     return factory
 
 
-def _rate_limit_middleware(config: OAuthConfig) -> list[Any]:
-    """The per-address limit on registration (#2); empty when ``register_rate_limit`` is None."""
-    if config.register_rate_limit is None:
+def _rate_limit_middleware(
+    limit: tuple[Literal["second", "minute", "hour", "day"], int] | None,
+) -> list[Any]:
+    """A per-address limit as middleware (#2); empty when ``limit`` is None."""
+    if limit is None:
         return []
-    return [RateLimitConfig(rate_limit=config.register_rate_limit).middleware]
+    return [RateLimitConfig(rate_limit=limit).middleware]
 
 
 def _preflight_handler(
@@ -228,19 +240,9 @@ def _protected_resource_handler(
     return handler
 
 
-def build_route_handlers(
-    server: AuthorizationServer, *, cors: bool = True
-) -> list[HTTPRouteHandler]:
-    """The OAuth route handlers for ``server``. ``LitestarOAuth`` registers them.
-
-    With ``cors`` true and ``config.cors_origins`` set, each route also answers CORS, and each path
-    gets a preflight handler. ``LitestarOAuth`` passes false when the app has its own
-    ``cors_config``.
-    """
+def _metadata_handler(server: AuthorizationServer, middleware: list[Any]) -> HTTPRouteHandler:
     config = server.config
     issuer = config.issuer.rstrip("/")
-    origins = config.cors_origins if cors else ()
-    middleware = _cors_middleware(origins)
 
     @get(
         "/.well-known/oauth-authorization-server",
@@ -258,17 +260,65 @@ def build_route_handlers(
             if config.registration_enabled
             else None,
             response_types_supported=("code",),
-            grant_types_supported=("authorization_code", "refresh_token"),
+            grant_types_supported=(
+                (GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN, GRANT_DEVICE_CODE)
+                if server.device_enabled
+                else (GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN)
+            ),
+            device_authorization_endpoint=f"{issuer}/oauth/device_authorization"
+            if server.device_enabled
+            else None,
             code_challenge_methods_supported=("S256",),
             token_endpoint_auth_methods_supported=("none",),
             scopes_supported=config.scopes_supported,
         )
 
+    return authorization_server_metadata
+
+
+def _device_handler(server: AuthorizationServer, middleware: list[Any]) -> HTTPRouteHandler:
+    config = server.config
+
+    @post(
+        "/oauth/device_authorization",
+        status_code=200,
+        tags=["oauth"],
+        middleware=[*middleware, *_rate_limit_middleware(config.device_authorization_rate_limit)],
+    )
+    async def device_authorization(request: Request[Any, Any, Any]) -> Response[Any]:
+        # RFC 8628 section 3.1: urlencoded, like the token endpoint.
+        form = parse_qs((await request.body()).decode(errors="replace"))
+        try:
+            issued = await server.start_device_authorization(
+                client_id=_first(form, "client_id"),
+                scope=_first(form, "scope"),
+                resource=_first(form, "resource"),
+            )
+        except OAuthError as exc:
+            return _error_response(exc)
+        return Response(issued, status_code=200, media_type="application/json", headers=_NO_STORE)
+
+    return device_authorization
+
+
+def build_route_handlers(
+    server: AuthorizationServer, *, cors: bool = True
+) -> list[HTTPRouteHandler]:
+    """The OAuth route handlers for ``server``. ``LitestarOAuth`` registers them.
+
+    With ``cors`` true and ``config.cors_origins`` set, each route also answers CORS, and each path
+    gets a preflight handler. ``LitestarOAuth`` passes false when the app has its own
+    ``cors_config``.
+    """
+    config = server.config
+    origins = config.cors_origins if cors else ()
+    middleware = _cors_middleware(origins)
+
     @post(
         "/oauth/register",
         status_code=201,
         tags=["oauth"],
-        middleware=[*middleware, *_rate_limit_middleware(config)],
+        middleware=[*middleware, *_rate_limit_middleware(config.register_rate_limit)],
     )
     async def register(request: Request[Any, Any, Any]) -> Response[Any]:
         try:
@@ -279,7 +329,9 @@ def build_route_handlers(
             )
         try:
             client = await server.register_client(
-                client_name=body.client_name, redirect_uris=body.redirect_uris
+                client_name=body.client_name,
+                redirect_uris=body.redirect_uris,
+                grant_types=body.grant_types,
             )
         except OAuthError as exc:
             return _error_response(exc)
@@ -288,8 +340,8 @@ def build_route_handlers(
                 client_id=client.client_id,
                 client_name=client.client_name,
                 redirect_uris=client.redirect_uris,
-                grant_types=("authorization_code", "refresh_token"),
-                response_types=("code",),
+                grant_types=client.grant_types,
+                response_types=("code",) if GRANT_AUTHORIZATION_CODE in client.grant_types else (),
                 token_endpoint_auth_method="none",  # noqa: S106 (RFC 7591 value, not a secret)
             ),
             status_code=201,
@@ -310,6 +362,7 @@ def build_route_handlers(
             code_verifier=_first(form, "code_verifier"),
             resource=_first(form, "resource"),
             refresh_token=_first(form, "refresh_token"),
+            device_code=_first(form, "device_code"),
         )
         try:
             issued = await server.exchange(token_request)
@@ -325,9 +378,11 @@ def build_route_handlers(
             await server.revoke(value)
         return Response(None, status_code=200, headers=_NO_STORE)
 
-    handlers: list[HTTPRouteHandler] = [authorization_server_metadata, token, revoke]
+    handlers: list[HTTPRouteHandler] = [_metadata_handler(server, middleware), token, revoke]
     if config.registration_enabled:
         handlers.append(register)
+    if server.device_enabled:
+        handlers.append(_device_handler(server, middleware))
     handlers.extend(_protected_resource_handler(config, r, middleware) for r in config.resources)
     return _with_preflight(handlers, origins)
 

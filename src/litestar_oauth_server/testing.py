@@ -25,7 +25,16 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
-from litestar_oauth_server.models import CodeRecord, OAuthClient, TokenKind, TokenRecord
+from litestar_oauth_server.models import (
+    GRANT_DEVICE_CODE,
+    CodeRecord,
+    DeviceDecision,
+    DeviceRecord,
+    DeviceStatus,
+    OAuthClient,
+    TokenKind,
+    TokenRecord,
+)
 from litestar_oauth_server.stores import ClientAdmin, ClientPurge, Stores
 
 type Case = Callable[[Stores], Awaitable[None]]
@@ -41,12 +50,36 @@ def _expect(condition: bool, message: str) -> None:  # noqa: FBT001
         raise AssertionError(message)
 
 
-def sample_client(client_id: str = "c1", *, created_at: datetime = NOW) -> OAuthClient:
+def sample_client(
+    client_id: str = "c1",
+    *,
+    created_at: datetime = NOW,
+    grant_types: tuple[str, ...] = ("authorization_code", "refresh_token"),
+) -> OAuthClient:
     return OAuthClient(
         client_id=client_id,
         client_name="Test client",
         redirect_uris=("https://client.example.com/cb", "http://127.0.0.1:8080/cb"),
         created_at=created_at,
+        grant_types=grant_types,
+    )
+
+
+def sample_device(
+    device_hash: str = "d1",
+    *,
+    user_code: str = "WDJBMJHT",
+    client_id: str = "c1",
+    expires_at: datetime = LATER,
+) -> DeviceRecord:
+    return DeviceRecord(
+        device_hash=device_hash,
+        user_code=user_code,
+        client_id=client_id,
+        scopes=("things:read", "things:write"),
+        resource="https://api.example.com/mcp",
+        expires_at=expires_at,
+        interval=5,
     )
 
 
@@ -187,7 +220,7 @@ async def list_for_subject_gives_current_refresh_tokens(stores: Stores) -> None:
 
 
 async def unused_clients_are_purged(stores: Stores) -> None:
-    """``ClientPurge``: delete old clients that no code or token refers to."""
+    """``ClientPurge``: delete old clients that no code, token or device refers to."""
     if not isinstance(stores.clients, ClientPurge):
         return
     old = NOW - timedelta(days=60)
@@ -197,10 +230,15 @@ async def unused_clients_are_purged(stores: Stores) -> None:
     await stores.clients.add(sample_client("recent", created_at=NOW))
     await stores.codes.add(sample_code("h1", client_id="with-code"))
     await stores.tokens.add(sample_token("t1", client_id="with-token"))
+    kept = ["with-code", "with-token", "recent"]
+    if stores.devices is not None:
+        await stores.clients.add(sample_client("with-device", created_at=old))
+        await stores.devices.add(sample_device(client_id="with-device"))
+        kept.append("with-device")
     deleted = await stores.clients.delete_unused(NOW - timedelta(days=30))
     _expect(deleted == 1, f"{deleted} clients deleted, expected 1")
     _expect(await stores.clients.get("idle") is None, "an idle client survived")
-    for client_id in ("with-code", "with-token", "recent"):
+    for client_id in kept:
         _expect(await stores.clients.get(client_id) is not None, f"{client_id} was deleted")
 
 
@@ -220,6 +258,117 @@ async def clients_can_be_listed_and_deleted(stores: Stores) -> None:
     _expect(await stores.clients.delete("c1") is False, "delete of a missing client said yes")
 
 
+async def client_keeps_its_grant_types(stores: Stores) -> None:
+    """A client's ``grant_types`` come back as stored (the device grant is opt-in per client)."""
+    grants = (GRANT_DEVICE_CODE, "refresh_token")
+    await stores.clients.add(sample_client("device-client", grant_types=grants))
+    found = await stores.clients.get("device-client")
+    if found is None:
+        raise AssertionError("a stored client was not found")
+    _expect(OAuthClient.of(found).grant_types == grants, "grant_types changed in storage")
+
+
+async def device_roundtrip(stores: Stores) -> None:
+    """``DeviceStore``: a stored authorization is found by device hash and by user code."""
+    if stores.devices is None:
+        return
+    await stores.devices.add(sample_device())
+    found = await stores.devices.get("d1")
+    if found is None:
+        raise AssertionError("a stored device authorization was not found")
+    _expect(DeviceRecord.of(found) == sample_device(), "the device record changed in storage")
+    by_code = await stores.devices.get_by_user_code("WDJBMJHT")
+    _expect(by_code is not None and by_code.device_hash == "d1", "not found by user code")
+    _expect(await stores.devices.get("nope") is None, "an unknown device hash was found")
+    _expect(await stores.devices.get_by_user_code("NOPE") is None, "an unknown code was found")
+
+
+async def device_decide_is_atomic(stores: Stores) -> None:
+    """Concurrent ``decide`` calls on one user code: exactly one wins, and its values stay."""
+    if stores.devices is None:
+        return
+    devices = stores.devices
+    for round_ in range(ROUNDS):
+        code = f"RACE{round_}"
+        await devices.add(sample_device(f"race-{round_}", user_code=code))
+        decisions = [
+            DeviceDecision(DeviceStatus.APPROVED, f"user-{n}", "company:9", ("things:read",))
+            for n in range(RACERS)
+        ]
+        results = await asyncio.gather(*(devices.decide(code, d, NOW) for d in decisions))
+        winners = [r for r in results if r is not None]
+        _expect(len(winners) == 1, f"{len(winners)} callers decided one code (round {round_})")
+        stored = await devices.get(f"race-{round_}")
+        _expect(stored is not None and stored.subject == winners[0].subject, "decision was mixed")
+
+
+async def device_decide_refuses_expired_and_decided(stores: Stores) -> None:
+    """``decide`` changes only a pending record that has not expired."""
+    if stores.devices is None:
+        return
+    devices = stores.devices
+    approve = DeviceDecision(DeviceStatus.APPROVED, "u1", "company:9", ("things:read",))
+    deny = DeviceDecision(DeviceStatus.DENIED)
+    await devices.add(sample_device("old", user_code="OLD", expires_at=NOW - timedelta(minutes=1)))
+    _expect(await devices.decide("OLD", approve, NOW) is None, "an expired record was decided")
+    await devices.add(sample_device("live", user_code="LIVE"))
+    _expect(await devices.decide("LIVE", approve, NOW) is not None, "a pending record was refused")
+    _expect(await devices.decide("LIVE", deny, NOW) is None, "a decided record was decided again")
+    stored = await devices.get("live")
+    if stored is None:
+        raise AssertionError("a decided record disappeared")
+    _expect(stored.status == "approved", "the first decision was lost")
+    _expect(tuple(stored.approved_scopes) == ("things:read",), "the approved scopes were lost")
+    _expect(await devices.decide("NOPE", approve, NOW) is None, "an unknown code was decided")
+
+
+async def device_decided_is_consumed_once(stores: Stores) -> None:
+    """``consume_decided`` ignores a pending record, and gives a decided one to exactly one caller."""
+    if stores.devices is None:
+        return
+    devices = stores.devices
+    await devices.add(sample_device("d1", user_code="ONE"))
+    _expect(await devices.consume_decided("d1") is None, "a pending record was consumed")
+    _expect(await devices.get("d1") is not None, "a pending record was deleted")
+    approve = DeviceDecision(DeviceStatus.APPROVED, "u1", "company:9", ("things:read",))
+    await devices.decide("ONE", approve, NOW)
+    first = await devices.consume_decided("d1")
+    _expect(first is not None and first.subject == "u1", "an approved record was not consumed")
+    _expect(await devices.get("d1") is None, "a consumed record was kept")
+    for round_ in range(ROUNDS):
+        await devices.add(sample_device(f"race-{round_}", user_code=f"RACE{round_}"))
+        await devices.decide(f"RACE{round_}", approve, NOW)
+        results = await asyncio.gather(
+            *(devices.consume_decided(f"race-{round_}") for _ in range(RACERS))
+        )
+        winners = [r for r in results if r is not None]
+        _expect(len(winners) == 1, f"{len(winners)} callers consumed one record (round {round_})")
+    await devices.add(sample_device("denied", user_code="NO"))
+    await devices.decide("NO", DeviceDecision(DeviceStatus.DENIED), NOW)
+    denied = await devices.consume_decided("denied")
+    _expect(denied is not None and denied.status == "denied", "a denied record was not consumed")
+
+
+async def device_poll_and_expiry(stores: Stores) -> None:
+    """``record_poll`` is stored, and ``delete_expired`` removes only expired records."""
+    if stores.devices is None:
+        return
+    devices = stores.devices
+    await devices.add(sample_device("live", user_code="LIVE"))
+    await devices.add(sample_device("old", user_code="OLD", expires_at=NOW - timedelta(minutes=1)))
+    slower = 10
+    await devices.record_poll("live", LATER, slower)
+    polled = await devices.get("live")
+    if polled is None:
+        raise AssertionError("a polled record disappeared")
+    _expect(polled.last_poll_at == LATER, "the poll time was lost")
+    _expect(polled.interval == slower, "the interval was lost")
+    deleted = await devices.delete_expired(NOW)
+    _expect(deleted == 1, f"{deleted} records deleted, expected 1")
+    _expect(await devices.get("old") is None, "an expired record survived")
+    _expect(await devices.get("live") is not None, "a live record was deleted")
+
+
 CASES: tuple[Case, ...] = (
     client_roundtrip,
     code_roundtrip,
@@ -231,5 +380,11 @@ CASES: tuple[Case, ...] = (
     list_for_subject_gives_current_refresh_tokens,
     unused_clients_are_purged,
     clients_can_be_listed_and_deleted,
+    client_keeps_its_grant_types,
+    device_roundtrip,
+    device_decide_is_atomic,
+    device_decide_refuses_expired_and_decided,
+    device_decided_is_consumed_once,
+    device_poll_and_expiry,
 )
 """Every case of the contract, in order."""

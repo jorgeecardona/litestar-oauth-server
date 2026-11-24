@@ -6,11 +6,21 @@ import pytest
 
 from litestar_oauth_server import Stores, in_memory_stores
 from litestar_oauth_server.testing import CASES, Case
-from tests.plain_stores import PlainClientStore, PlainCodeStore, PlainTokenStore
+from tests.plain_stores import (
+    PlainClientStore,
+    PlainCodeStore,
+    PlainDeviceStore,
+    PlainTokenStore,
+)
 
 
 def plain_stores() -> Stores:
-    return Stores(clients=PlainClientStore(), codes=PlainCodeStore(), tokens=PlainTokenStore())
+    return Stores(
+        clients=PlainClientStore(),
+        codes=PlainCodeStore(),
+        tokens=PlainTokenStore(),
+        devices=PlainDeviceStore(),
+    )
 
 
 @pytest.mark.anyio

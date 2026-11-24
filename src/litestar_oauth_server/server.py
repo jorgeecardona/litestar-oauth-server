@@ -28,13 +28,22 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, NoReturn
 from urllib.parse import urlencode, urlsplit
 
 from litestar_oauth_server.models import (
+    DEFAULT_GRANT_TYPES,
+    GRANT_AUTHORIZATION_CODE,
+    GRANT_DEVICE_CODE,
+    GRANT_REFRESH_TOKEN,
     Approval,
     AuthorizationRequest,
     CodeRecord,
+    DeviceAuthorization,
+    DeviceDecision,
+    DeviceRecord,
+    DeviceRequest,
+    DeviceStatus,
     GrantSummary,
     OAuthClient,
     OAuthError,
@@ -44,9 +53,13 @@ from litestar_oauth_server.models import (
     TokenResponse,
     VerifiedToken,
 )
-from litestar_oauth_server.stores import ClientAdmin, ClientPurge, Stores
+from litestar_oauth_server.stores import ClientAdmin, ClientPurge, DeviceStore, Stores
 
 CODE_CHALLENGE_METHOD = "S256"
+# RFC 8628 section 6.1: consonants only (no vowels, no look-alike digits), about 34.5 bits in 8.
+USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
+USER_CODE_LENGTH = 8
+SLOW_DOWN_STEP = 5  # seconds added to the polling interval (RFC 8628 section 3.5)
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1")
 _MAX_CLIENT_NAME = 255
 
@@ -94,6 +107,25 @@ def normalize_resource(resource: str) -> str:
     return resource.rstrip("/")
 
 
+def normalize_user_code(text: str) -> str:
+    """The stored form of a user code: upper case, and only the characters of the alphabet.
+
+    A user may type ``wdjb-mjht``, ``WDJB MJHT`` or ``WDJBMJHT``: all give ``WDJBMJHT`` (RFC 8628
+    section 6.1).
+    """
+    return "".join(c for c in text.upper() if c in USER_CODE_ALPHABET)
+
+
+def format_user_code(code: str) -> str:
+    """The user code as shown to the user: ``WDJB-MJHT``."""
+    half = len(code) // 2
+    return f"{code[:half]}-{code[half:]}"
+
+
+def _new_user_code() -> str:
+    return "".join(secrets.choice(USER_CODE_ALPHABET) for _ in range(USER_CODE_LENGTH))
+
+
 @dataclass(frozen=True, slots=True)
 class OAuthConfig:
     """Everything the server needs to know about the host app.
@@ -112,6 +144,12 @@ class OAuthConfig:
 
     ``unused_client_ttl`` is how old a client must be before ``purge_unused_clients`` may delete it
     when no code or token ever referred to it (#2).
+
+    The device grant (RFC 8628, #6) is on when ``device_verification_uri`` is set: the host's page
+    where the user types the code. It also needs ``stores.devices``. ``device_code_ttl`` is how
+    long a device code and its user code live, ``device_interval`` the polling interval the client
+    must keep, and ``device_authorization_rate_limit`` caps ``POST /oauth/device_authorization``
+    per client address like ``register_rate_limit``.
     """
 
     issuer: str
@@ -129,6 +167,12 @@ class OAuthConfig:
         "hour",
         20,
     )
+    device_verification_uri: str = ""
+    device_code_ttl: timedelta = timedelta(minutes=15)
+    device_interval: timedelta = timedelta(seconds=5)
+    device_authorization_rate_limit: (
+        tuple[Literal["second", "minute", "hour", "day"], int] | None
+    ) = ("hour", 60)
 
     def __post_init__(self) -> None:
         if not self.resources:
@@ -137,6 +181,11 @@ class OAuthConfig:
             raise ValueError("OAuthConfig.scopes_supported must list at least one scope")
         if self.register_rate_limit is not None and self.register_rate_limit[1] < 1:
             raise ValueError("OAuthConfig.register_rate_limit count must be at least 1")
+        limit = self.device_authorization_rate_limit
+        if limit is not None and limit[1] < 1:
+            raise ValueError("OAuthConfig.device_authorization_rate_limit count must be at least 1")
+        if self.device_interval < timedelta(seconds=1):
+            raise ValueError("OAuthConfig.device_interval must be at least one second")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,14 +206,32 @@ class AuthorizationServer:
     stores: Stores
     now: Callable[[], datetime] = field(default=_utcnow)
 
+    def __post_init__(self) -> None:
+        if self.config.device_verification_uri and self.stores.devices is None:
+            raise ValueError(
+                "OAuthConfig.device_verification_uri is set but stores.devices is None; "
+                "the device grant needs a DeviceStore"
+            )
+
+    @property
+    def device_enabled(self) -> bool:
+        """Whether the device grant is on: a verification page and a device store."""
+        return bool(self.config.device_verification_uri) and self.stores.devices is not None
+
     # -- registration -------------------------------------------------------------------------
 
     async def register_client(
-        self, *, client_name: str, redirect_uris: tuple[str, ...]
+        self,
+        *,
+        client_name: str,
+        redirect_uris: tuple[str, ...] = (),
+        grant_types: tuple[str, ...] = (),
     ) -> OAuthClient:
         if not self.config.registration_enabled:
             raise OAuthError("access_denied", "dynamic client registration is disabled", 403)
-        return await self.add_client(client_name=client_name, redirect_uris=redirect_uris)
+        return await self.add_client(
+            client_name=client_name, redirect_uris=redirect_uris, grant_types=grant_types
+        )
 
     async def purge_unused_clients(self, older_than: timedelta | None = None) -> int:
         """Delete clients older than ``older_than`` that no code or token refers to (#2).
@@ -210,10 +277,21 @@ class AuthorizationServer:
         return clients
 
     async def add_client(
-        self, *, client_name: str, redirect_uris: tuple[str, ...], client_id: str = ""
+        self,
+        *,
+        client_name: str,
+        redirect_uris: tuple[str, ...] = (),
+        client_id: str = "",
+        grant_types: tuple[str, ...] = (),
     ) -> OAuthClient:
-        """Register a client. Also the way to pre-register one with a fixed ``client_id``."""
-        if not redirect_uris:
+        """Register a client. Also the way to pre-register one with a fixed ``client_id``.
+
+        ``grant_types`` defaults to ``authorization_code`` and ``refresh_token``. Add
+        ``GRANT_DEVICE_CODE`` to let the client use the device grant (RFC 8628); with it and
+        without ``authorization_code``, ``redirect_uris`` may be empty.
+        """
+        grants = self._check_grant_types(grant_types)
+        if GRANT_AUTHORIZATION_CODE in grants and not redirect_uris:
             raise OAuthError("invalid_redirect_uri", "redirect_uris is required")
         for uri in redirect_uris:
             if not redirect_uri_allowed(uri):
@@ -225,9 +303,27 @@ class AuthorizationServer:
             client_name=client_name[:_MAX_CLIENT_NAME],
             redirect_uris=redirect_uris,
             created_at=self.now(),
+            grant_types=grants,
         )
         await self.stores.clients.add(client)
         return client
+
+    def _check_grant_types(self, requested: tuple[str, ...]) -> tuple[str, ...]:
+        if not requested:
+            return DEFAULT_GRANT_TYPES
+        allowed = {GRANT_AUTHORIZATION_CODE, GRANT_REFRESH_TOKEN}
+        if self.device_enabled:
+            allowed.add(GRANT_DEVICE_CODE)
+        unknown = [g for g in requested if g not in allowed]
+        if unknown:
+            raise OAuthError("invalid_client_metadata", f"unsupported grant type: {unknown[0]}")
+        grants = tuple(dict.fromkeys(requested))
+        if GRANT_AUTHORIZATION_CODE not in grants and GRANT_DEVICE_CODE not in grants:
+            raise OAuthError(
+                "invalid_client_metadata",
+                "grant_types needs authorization_code or the device grant",
+            )
+        return grants
 
     # -- resource and scope rules -------------------------------------------------------------
 
@@ -322,6 +418,8 @@ class AuthorizationServer:
             return await self._exchange_code(request)
         if request.grant_type == "refresh_token":
             return await self._exchange_refresh(request)
+        if request.grant_type == GRANT_DEVICE_CODE and self.device_enabled:
+            return await self._exchange_device(request)
         raise OAuthError("unsupported_grant_type", "use authorization_code or refresh_token")
 
     async def _exchange_code(self, request: TokenRequest) -> TokenResponse:
@@ -375,6 +473,171 @@ class AuthorizationServer:
                 binding=record.binding,
                 scopes=tuple(record.scopes),
                 resource=record.resource,
+            )
+        )
+
+    # -- device grant (RFC 8628, #6) ----------------------------------------------------------
+
+    def _devices(self) -> DeviceStore:
+        devices = self.stores.devices
+        if devices is None or not self.device_enabled:
+            raise OAuthError("unsupported_grant_type", "the device grant is not enabled")
+        return devices
+
+    async def start_device_authorization(
+        self, *, client_id: str, scope: str = "", resource: str = ""
+    ) -> DeviceAuthorization:
+        """The device authorization endpoint: mint a device code and a user code (section 3.1).
+
+        Only a client registered with ``GRANT_DEVICE_CODE`` may start one. ``scope`` is the
+        space-separated list the client asks for; the user may approve fewer.
+        """
+        devices = self._devices()
+        found = await self.stores.clients.get(client_id)
+        if found is None:
+            raise OAuthError("invalid_client", "unknown client_id; the client must register first")
+        if GRANT_DEVICE_CODE not in OAuthClient.of(found).grant_types:
+            raise OAuthError("unauthorized_client", "this client may not use the device grant")
+        scopes = tuple(dict.fromkeys(scope.split()))
+        unknown = [x for x in scopes if x not in self.config.scopes_supported]
+        if unknown:
+            raise OAuthError("invalid_scope", f"unknown scope: {unknown[0]}")
+        resolved = self.resolve_resource(resource)
+        user_code = _new_user_code()
+        for _ in range(5):  # a taken code is rare (20^8); the store keeps user_code unique anyway
+            if await devices.get_by_user_code(user_code) is None:
+                break
+            user_code = _new_user_code()
+        device_code = secrets.token_urlsafe(32)
+        interval = int(self.config.device_interval.total_seconds())
+        await devices.add(
+            DeviceRecord(
+                device_hash=hash_secret(device_code),
+                user_code=user_code,
+                client_id=client_id,
+                scopes=scopes,
+                resource=resolved,
+                expires_at=self.now() + self.config.device_code_ttl,
+                interval=interval,
+            )
+        )
+        shown = format_user_code(user_code)
+        uri = self.config.device_verification_uri
+        separator = "&" if urlsplit(uri).query else "?"
+        return DeviceAuthorization(
+            device_code=device_code,
+            user_code=shown,
+            verification_uri=uri,
+            verification_uri_complete=f"{uri}{separator}{urlencode({'user_code': shown})}",
+            expires_in=int(self.config.device_code_ttl.total_seconds()),
+            interval=interval,
+        )
+
+    async def _pending_device(self, user_code: str) -> DeviceRecord:
+        record = await self._devices().get_by_user_code(normalize_user_code(user_code))
+        if (
+            record is None
+            or record.status != DeviceStatus.PENDING
+            or record.expires_at <= self.now()
+        ):
+            raise OAuthError("invalid_request", "unknown, expired or already decided code", 404)
+        return DeviceRecord.of(record)
+
+    async def describe_device(self, user_code: str) -> DeviceRequest:
+        """What the host's page shows after the user types a code: the client and what it asks.
+
+        The page must show the client name and ask the user to confirm that they started this on
+        their own device, also when the code came in ``verification_uri_complete`` (RFC 8628
+        section 5.4). Raises ``OAuthError`` for an unknown, expired or already decided code.
+        """
+        record = await self._pending_device(user_code)
+        client = await self.stores.clients.get(record.client_id)
+        return DeviceRequest(
+            user_code=format_user_code(record.user_code),
+            client_id=record.client_id,
+            client_name=client.client_name if client is not None else record.client_id,
+            scopes=record.scopes,
+            resource=record.resource,
+            expires_at=record.expires_at,
+        )
+
+    async def approve_device(self, user_code: str, approval: Approval) -> None:
+        """Approve the device with this user code. The caller has signed the user in.
+
+        ``approval.scopes`` may be narrower than what the client asked for, never wider.
+        """
+        record = await self._pending_device(user_code)
+        scopes = self._check_scopes(approval.scopes)
+        if record.scopes and not set(scopes) <= set(record.scopes):
+            raise OAuthError("invalid_scope", "approved scopes are wider than the ones requested")
+        decision = DeviceDecision(DeviceStatus.APPROVED, approval.subject, approval.binding, scopes)
+        decided = await self._devices().decide(record.user_code, decision, self.now())
+        if decided is None:
+            raise OAuthError("invalid_request", "unknown, expired or already decided code", 404)
+
+    async def deny_device(self, user_code: str) -> None:
+        """Deny the device with this user code. The client's next poll gets ``access_denied``."""
+        record = await self._pending_device(user_code)
+        decision = DeviceDecision(DeviceStatus.DENIED)
+        decided = await self._devices().decide(record.user_code, decision, self.now())
+        if decided is None:
+            raise OAuthError("invalid_request", "unknown, expired or already decided code", 404)
+
+    async def purge_expired_devices(self) -> int:
+        """Delete expired device authorizations and return how many. Call it from a periodic job.
+
+        The endpoint is open, so rows pile up. After this, an expired device code is answered as
+        unknown (``invalid_grant``) instead of ``expired_token``.
+        """
+        return await self._devices().delete_expired(self.now())
+
+    async def _refuse_pending(
+        self, devices: DeviceStore, record: DeviceRecord, now: datetime
+    ) -> NoReturn:
+        """Answer a poll of an undecided device: ``slow_down`` if too fast, else pending."""
+        last = record.last_poll_at
+        if last is not None and now - last < timedelta(seconds=record.interval):
+            faster = record.interval + SLOW_DOWN_STEP
+            await devices.record_poll(record.device_hash, now, faster)
+            raise OAuthError("slow_down", f"poll every {faster} seconds or slower")
+        await devices.record_poll(record.device_hash, now, record.interval)
+        raise OAuthError("authorization_pending", "the user has not decided yet")
+
+    async def _exchange_device(self, request: TokenRequest) -> TokenResponse:
+        devices = self._devices()
+        if not request.device_code or not request.client_id:
+            raise OAuthError("invalid_request", "device_code and client_id are required")
+        now = self.now()
+        device_hash = hash_secret(request.device_code)
+        found = await devices.get(device_hash)
+        if found is None:
+            raise OAuthError("invalid_grant", "unknown or already used device code")
+        record = DeviceRecord.of(found)
+        if record.client_id != request.client_id:
+            raise OAuthError("invalid_grant", "device code was issued to a different client")
+        if record.expires_at <= now:
+            raise OAuthError("expired_token", "the device code has expired")
+        if request.resource and self.resolve_resource(request.resource) != record.resource:
+            raise OAuthError("invalid_target", "resource differs from the authorized one")
+        if record.status == DeviceStatus.PENDING:
+            await self._refuse_pending(devices, record, now)
+        # Claim first, validate after: only one poll gets the decided record.
+        claimed = await devices.consume_decided(device_hash)
+        if claimed is None:
+            raise OAuthError("invalid_grant", "unknown or already used device code")
+        decided = DeviceRecord.of(claimed)
+        if decided.expires_at <= now:
+            raise OAuthError("expired_token", "the device code has expired")
+        if decided.status == DeviceStatus.DENIED:
+            raise OAuthError("access_denied", "the user denied the request")
+        return await self._issue(
+            _Grant(
+                family_id=secrets.token_urlsafe(16),
+                client_id=decided.client_id,
+                subject=decided.subject,
+                binding=decided.binding,
+                scopes=decided.approved_scopes,
+                resource=decided.resource,
             )
         )
 

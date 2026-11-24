@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.11]
+
+### Added
+
+- The device authorization grant (RFC 8628) for CLI and headless login (#6). Set
+  `OAuthConfig(device_verification_uri=...)`. New: `POST /oauth/device_authorization`, the device
+  grant on the token endpoint (`authorization_pending`, `slow_down`, `access_denied`,
+  `expired_token`), the metadata field `device_authorization_endpoint`, and on the server
+  `start_device_authorization`, `describe_device`, `approve_device`, `deny_device` and
+  `purge_expired_devices`.
+- New store protocol `DeviceStore` and `Stores.devices` (optional; keyword only). The in-memory and
+  SQL stores have it, and the contract suite tests it.
+- A client has `grant_types`. The device grant is only for a client that has
+  `urn:ietf:params:oauth:grant-type:device_code`, so nobody can start a device flow under the name
+  of a client that did not ask for it. Dynamic registration reads and echoes `grant_types`. A client
+  without `authorization_code` needs no `redirect_uris`.
+- `ClientLike` has `grant_types`. A store that does not keep it gives the default (no device grant).
+
+### Changed
+
+- SQL stores: new table `{prefix}devices` and a column `grant_types` on `{prefix}clients`. Add them
+  with your own migration. `SqlStores.delete_expired` also deletes expired device authorizations,
+  and `purge_unused_clients` counts a pending device as a use.
+
 ## [0.0.10]
 
 ### Added

@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # for the type checker only: nothing is imported at runtime
-    from litestar_oauth_server import ClientLike, CodeLike, TokenLike
+    from litestar_oauth_server import ClientLike, CodeLike, DeviceDecision, DeviceLike, TokenLike
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,23 @@ class Client:
     client_name: str
     redirect_uris: list[str]
     created_at: datetime
+    grant_types: list[str]
+
+
+@dataclass(frozen=True)
+class Device:
+    device_hash: str
+    user_code: str
+    client_id: str
+    scopes: list[str]
+    resource: str
+    expires_at: datetime
+    interval: int
+    last_poll_at: datetime | None
+    status: str
+    subject: str
+    binding: str
+    approved_scopes: list[str]
 
 
 @dataclass(frozen=True)
@@ -58,7 +75,11 @@ class PlainClientStore:
 
     async def add(self, client: ClientLike) -> None:
         self.rows[client.client_id] = Client(
-            client.client_id, client.client_name, list(client.redirect_uris), client.created_at
+            client.client_id,
+            client.client_name,
+            list(client.redirect_uris),
+            client.created_at,
+            list(client.grant_types),
         )
 
     async def get(self, client_id: str) -> Client | None:
@@ -133,3 +154,64 @@ class PlainTokenStore:
             and r.used_at is None
         ]
         return tuple(sorted(found, key=lambda r: r.created_at, reverse=True))
+
+
+class PlainDeviceStore:
+    def __init__(self) -> None:
+        self.rows: dict[str, Device] = {}
+
+    async def add(self, record: DeviceLike) -> None:
+        r = record
+        self.rows[r.device_hash] = Device(
+            r.device_hash,
+            r.user_code,
+            r.client_id,
+            list(r.scopes),
+            r.resource,
+            r.expires_at,
+            r.interval,
+            r.last_poll_at,
+            str(r.status),
+            r.subject,
+            r.binding,
+            list(r.approved_scopes),
+        )
+
+    async def get(self, device_hash: str) -> Device | None:
+        return self.rows.get(device_hash)
+
+    async def get_by_user_code(self, user_code: str) -> Device | None:
+        return next((r for r in self.rows.values() if r.user_code == user_code), None)
+
+    async def decide(
+        self, user_code: str, decision: DeviceDecision, now: datetime
+    ) -> Device | None:
+        row = await self.get_by_user_code(user_code)
+        if row is None or row.status != "pending" or row.expires_at <= now:
+            return None
+        decided = replace(
+            row,
+            status=str(decision.status),
+            subject=decision.subject,
+            binding=decision.binding,
+            approved_scopes=list(decision.scopes),
+        )
+        self.rows[row.device_hash] = decided
+        return decided
+
+    async def record_poll(self, device_hash: str, now: datetime, interval: int) -> None:
+        row = self.rows.get(device_hash)
+        if row is not None:
+            self.rows[device_hash] = replace(row, last_poll_at=now, interval=interval)
+
+    async def consume_decided(self, device_hash: str) -> Device | None:
+        row = self.rows.get(device_hash)
+        if row is None or row.status == "pending":
+            return None
+        return self.rows.pop(device_hash)
+
+    async def delete_expired(self, now: datetime) -> int:
+        doomed = [key for key, r in self.rows.items() if r.expires_at < now]
+        for key in doomed:
+            del self.rows[key]
+        return len(doomed)
