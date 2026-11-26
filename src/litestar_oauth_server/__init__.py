@@ -72,7 +72,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__version__ = "0.0.11"  # the single source of truth; pyproject reads it via [tool.hatch.version]
+__version__ = "0.0.12"  # the single source of truth; pyproject reads it via [tool.hatch.version]
 
 __all__ = [
     "DEFAULT_GRANT_TYPES",

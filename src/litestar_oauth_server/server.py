@@ -14,7 +14,8 @@ Rules that carry weight:
 
 - Codes and refresh tokens are single use, claimed atomically *before* they are validated. A code
   that fails a check stays burned.
-- A refresh token used twice revokes its whole family (the chain started by one approval).
+- A refresh token used twice revokes its whole family (the chain started by one approval), also
+  when the replay runs while the first use is still issuing its tokens (#11).
 - Every token is bound to one ``resource`` (RFC 8707) and is rejected at any other.
 - Only SHA-256 hashes of codes and tokens are stored.
 """
@@ -457,7 +458,7 @@ class AuthorizationServer:
             seen = await self.stores.tokens.get(token_hash)
             if seen is not None and seen.kind == TokenKind.REFRESH and seen.used_at is not None:
                 # A rotated token came back: assume theft, end the whole chain.
-                await self.stores.tokens.revoke_family(seen.family_id, now)
+                await self.revoke_family(seen.family_id)
             raise OAuthError("invalid_grant", "unknown, expired, revoked or already used token")
         if record.revoked_at is not None or record.expires_at < now:
             raise OAuthError("invalid_grant", "unknown, expired, revoked or already used token")
@@ -465,7 +466,7 @@ class AuthorizationServer:
             raise OAuthError("invalid_grant", "token was issued to a different client")
         if request.resource and self.resolve_resource(request.resource) != record.resource:
             raise OAuthError("invalid_target", "resource differs from the authorized one")
-        return await self._issue(
+        issued = await self._issue(
             _Grant(
                 family_id=record.family_id,
                 client_id=record.client_id,
@@ -475,6 +476,20 @@ class AuthorizationServer:
                 resource=record.resource,
             )
         )
+        await self._refuse_if_revoked_meanwhile(token_hash, record.family_id)
+        return issued
+
+    async def _refuse_if_revoked_meanwhile(self, token_hash: str, family_id: str) -> None:
+        """Revoke and raise when the family was revoked while a rotation ran (#11).
+
+        Call it after the new tokens are inserted. A revocation that ran between the claim of the
+        old refresh token and the insert did not see the new rows. It shows on the old token, so
+        revoke again and hand out nothing.
+        """
+        claimed = await self.stores.tokens.get(token_hash)
+        if claimed is None or claimed.revoked_at is not None:
+            await self.stores.tokens.revoke_family(family_id, self.now())
+            raise OAuthError("invalid_grant", "unknown, expired, revoked or already used token")
 
     # -- device grant (RFC 8628, #6) ----------------------------------------------------------
 
@@ -698,9 +713,16 @@ class AuthorizationServer:
         """RFC 7009. Always succeeds; an unknown token is not an error. Revokes the family."""
         record = await self.stores.tokens.get(hash_secret(token))
         if record is not None:
-            await self.stores.tokens.revoke_family(record.family_id, self.now())
+            await self.revoke_family(record.family_id)
 
     async def revoke_family(self, family_id: str) -> None:
+        """Revoke every token of the family. Always use this, not the store method.
+
+        It calls the store twice (#11). A rotation may insert tokens while the first call runs,
+        and one SQL ``UPDATE`` does not see rows committed after it started. The second call does.
+        A rotation that inserts later than that sees the first call's result and revokes itself.
+        """
+        await self.stores.tokens.revoke_family(family_id, self.now())
         await self.stores.tokens.revoke_family(family_id, self.now())
 
     async def list_grants(self, subject: str) -> tuple[GrantSummary, ...]:

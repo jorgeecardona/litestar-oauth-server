@@ -87,6 +87,18 @@ class CodeStore(Protocol):
 
 
 class TokenStore(Protocol):
+    """Tokens by hash.
+
+    Revocation depends on what a read sees (#11), so a store must:
+
+    - commit each call in its own transaction before it returns (no request-wide transaction that
+      commits with the response);
+    - answer ``get`` from the current data, under READ COMMITTED: no replica, no cache;
+    - revoke in ``revoke_family`` every token of the family committed before the call started, and
+      have that visible to every read that starts after it returns (no queued revocation);
+    - keep used and revoked tokens until they expire, so ``get`` finds them.
+    """
+
     async def add(self, record: TokenLike) -> None: ...
 
     async def get(self, token_hash: str) -> TokenLike | None: ...

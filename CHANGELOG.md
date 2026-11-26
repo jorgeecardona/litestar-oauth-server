@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.12]
+
+### Fixed
+
+- Security: a refresh token replay, a revocation (`/oauth/revoke`) or a `revoke_family` that ran
+  while a refresh was issuing its tokens could leave live tokens in a revoked family. A revocation
+  now calls the store twice, and a refresh that finds its family revoked hands out nothing (#11).
+- The `TokenStore` docstring states what a store must do for revocation to hold: commit each call,
+  read current data under READ COMMITTED (no replica or cache), and keep used and revoked tokens
+  until they expire. A store that runs a whole request in one transaction must change (#11).
+
 ## [0.0.11]
 
 ### Added

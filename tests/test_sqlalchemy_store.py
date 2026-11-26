@@ -5,6 +5,7 @@ database and rebuild the three tables before each test. Otherwise they start a c
 pytest-servex, which needs Docker.
 """
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
@@ -17,8 +18,17 @@ from pytest_servex import PostgresDatabase
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from litestar_oauth_server import (
+    AuthorizationServer,
+    OAuthConfig,
+    OAuthError,
+    TokenRequest,
+    TokenResponse,
+)
 from litestar_oauth_server.sqlalchemy import SqlStores, oauth_tables, sql_stores
 from litestar_oauth_server.testing import CASES, Case, sample_code, sample_token
+from tests.conftest import RESOURCE
+from tests.test_server import issue
 
 TABLES = oauth_tables(MetaData())
 
@@ -88,3 +98,25 @@ def test_another_dialect_is_refused() -> None:
     engine = cast("AsyncEngine", SimpleNamespace(dialect=SimpleNamespace(name="mysql")))
     with pytest.raises(ValueError, match="Postgres only"):
         sql_stores(engine, TABLES)
+
+
+@pytest.mark.anyio
+async def test_two_refreshes_of_one_token_leave_no_live_token(
+    stores: SqlStores, config: OAuthConfig
+) -> None:
+    # One of the two is a replay. Whatever the order on Postgres, the family must end dead (#11).
+    server = AuthorizationServer(config=config, stores=stores)
+    for _ in range(25):
+        client_id, first = await issue(server)
+        request = TokenRequest(
+            grant_type="refresh_token", refresh_token=first.refresh_token, client_id=client_id
+        )
+        results = await asyncio.gather(
+            server.exchange(request), server.exchange(request), return_exceptions=True
+        )
+        unexpected = [r for r in results if not isinstance(r, TokenResponse | OAuthError)]
+        assert unexpected == []
+        for result in (first, *results):
+            if isinstance(result, TokenResponse):
+                assert await server.verify(result.access_token, RESOURCE) is None
+        assert await server.list_grants("u1") == ()
