@@ -1,7 +1,7 @@
 [project]
 name = "litestar-oauth-server"
 dynamic = ["version"]  # the single source of truth is __version__ in src/litestar_oauth_server/__init__.py (see [tool.hatch.version])
-description = "An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata"
+description = "An OAuth 2.1 authorization server plugin for Litestar, with the metadata MCP clients need"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

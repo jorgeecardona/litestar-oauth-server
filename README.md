@@ -1,11 +1,32 @@
-# litestar-oauth-server
+<h1 align="center">litestar-oauth-server</h1>
 
-[![pipeline status](https://gitlab.com/cardona-oss/litestar-oauth-server/badges/main/pipeline.svg)](https://gitlab.com/cardona-oss/litestar-oauth-server/-/pipelines)
-[![PyPI version](https://img.shields.io/pypi/v/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
-[![Python versions](https://img.shields.io/pypi/pyversions/litestar-oauth-server.svg)](https://pypi.org/project/litestar-oauth-server/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/LICENSE)
+<p align="center"><strong>Add OAuth 2.1 to a Litestar app: PKCE, client registration, token and
+refresh, plus the metadata MCP clients need.</strong></p>
 
-An OAuth 2.1 authorization server plugin for Litestar: PKCE, client registration, token and refresh, with MCP-ready metadata
+<p align="center">
+  <a href="https://pypi.org/project/litestar-oauth-server/"><img alt="PyPI" src="https://img.shields.io/pypi/v/litestar-oauth-server?style=flat-square"></a>
+  <a href="https://pypi.org/project/litestar-oauth-server/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/litestar-oauth-server?style=flat-square"></a>
+  <a href="https://cardona-oss.gitlab.io/litestar-oauth-server/"><img alt="Docs" src="https://img.shields.io/badge/docs-cardona--oss.gitlab.io%2Flitestar--oauth--server-blue?style=flat-square"></a>
+  <a href="https://gitlab.com/cardona-oss/litestar-oauth-server/-/pipelines"><img alt="Pipeline" src="https://img.shields.io/gitlab/pipeline-status/cardona-oss%2Flitestar-oauth-server?branch=main&style=flat-square"></a>
+  <a href="https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="https://cardona-oss.gitlab.io/litestar-oauth-server/">Docs</a> ·
+  <a href="https://cardona-oss.gitlab.io/litestar-oauth-server/api/">API reference</a> ·
+  <a href="https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CHANGELOG.md">Changelog</a>
+</p>
+
+---
+
+## Overview
+
+litestar-oauth-server is a plugin for [Litestar](https://litestar.dev). It adds the OAuth 2.1
+routes: the token endpoint (authorization code with PKCE, refresh), revocation, client
+registration and the device grant. It also serves the metadata documents MCP clients use for
+discovery. Your app provides the login, the consent screen and the database.
+
+Status: beta.
 
 ## Install
 
@@ -177,13 +198,27 @@ app. It is the server side an MCP connector needs, and it works the same for any
   They take and return any object with the right attributes (`ClientLike`, `CodeLike`,
   `TokenLike`), so your database layer does not import this package at runtime.
 
+## Limits
+
+- Public clients only. The token endpoint takes no client secret, and there is no
+  `client_credentials` grant.
+- Tokens are random strings, not JWTs. A resource checks one with `server.verify`, so it needs
+  the same stores. There is no introspection endpoint.
+- No OpenID Connect: no ID token and no `userinfo` endpoint.
+- Client ID Metadata Documents are not supported. A client registers (RFC 7591) or is
+  pre-registered.
+- The SQL stores run on Postgres only, and the package ships no migrations.
+- No login page and no consent page. Your app provides both.
+- Not yet tested against Claude, ChatGPT or Cursor as clients.
+- The API can change between releases.
+
 ## Links
 
-- **Documentation:** https://cardona-oss.gitlab.io/litestar-oauth-server/
-- **Source:** https://gitlab.com/cardona-oss/litestar-oauth-server
-- **Issues:** https://gitlab.com/cardona-oss/litestar-oauth-server/-/issues
-- **PyPI:** https://pypi.org/project/litestar-oauth-server/
-- **Changelog:** [CHANGELOG.md](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CHANGELOG.md)
+- Documentation: <https://cardona-oss.gitlab.io/litestar-oauth-server/>
+- [API reference](https://cardona-oss.gitlab.io/litestar-oauth-server/api/)
+- Repository: <https://gitlab.com/cardona-oss/litestar-oauth-server>
+- PyPI: <https://pypi.org/project/litestar-oauth-server/>
+- Changelog: [CHANGELOG.md](https://gitlab.com/cardona-oss/litestar-oauth-server/-/blob/main/CHANGELOG.md)
 
 ## Contributing
 
