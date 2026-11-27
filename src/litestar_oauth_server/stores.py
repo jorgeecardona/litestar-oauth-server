@@ -41,7 +41,12 @@ from litestar_oauth_server.models import (
 class ClientStore(Protocol):
     async def add(self, client: ClientLike) -> None: ...
 
-    async def get(self, client_id: str) -> ClientLike | None: ...
+    async def get(self, client_id: str) -> ClientLike | None:
+        """The client, or ``None``. The token endpoint refuses a client this returns ``None`` for.
+
+        So it must find every client that holds codes or tokens (#13).
+        """
+        ...
 
 
 @runtime_checkable

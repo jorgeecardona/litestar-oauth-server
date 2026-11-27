@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.13]
+
+### Fixed
+
+- Security: a deleted client could refresh its tokens forever. The token endpoint now answers
+  `invalid_client` for a client that is not in the client store, on all three grants, so an MCP
+  client can register again. Nothing is consumed or revoked by that answer (#13).
+- The device verification page calls (`describe_device`, `approve_device`, `deny_device`) answer
+  404 for a deleted client (#13).
+- Change for hosts: `ClientStore.get` must find every client that holds codes or tokens.
+
 ## [0.0.12]
 
 ### Fixed

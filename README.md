@@ -165,8 +165,8 @@ app. It is the server side an MCP connector needs, and it works the same for any
   that no code or token refers to. Run it from your own periodic job. Your client store opts in by
   implementing `ClientPurge.delete_unused(created_before)`.
 - `server.list_clients()` and `server.delete_client(client_id)` for an admin page. Your client store
-  opts in by implementing `ClientAdmin`. Tokens already issued to a deleted client stay valid until
-  they expire or are revoked.
+  opts in by implementing `ClientAdmin`. A deleted client cannot refresh or exchange a code. Its
+  access tokens stay valid until they expire or are revoked.
 - Device authorization grant (RFC 8628) for CLI and headless login, opt-in for each client.
 - Stores on Postgres with SQLAlchemy (extra `sqlalchemy`), and a contract test suite for your own.
 - A bearer guard that answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`.

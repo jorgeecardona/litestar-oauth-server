@@ -262,8 +262,10 @@ class AuthorizationServer:
     async def delete_client(self, client_id: str) -> bool:
         """Delete one client and return whether it existed (#2).
 
-        Tokens already issued to it stay valid until they expire or are revoked. To cut them now,
-        call ``revoke_family`` on the grants (``list_grants`` names them).
+        The token endpoint refuses its codes, device codes and refresh tokens from now on (#13).
+        Access tokens already issued stay valid until they expire or are revoked. To cut them now,
+        call ``revoke_family`` on the grants (``list_grants`` names them). Nothing is revoked
+        here: registering the same ``client_id`` again makes its refresh tokens work again.
         Raises ``TypeError`` when the client store does not implement ``ClientAdmin``.
         """
         return await self._client_admin().delete(client_id)
@@ -356,15 +358,20 @@ class AuthorizationServer:
             raise OAuthError("invalid_client", "unknown client_id", 404)
         return OAuthClient.of(client)
 
+    async def _registered_client(self, client_id: str) -> OAuthClient:
+        """The client of a request. Raises ``invalid_client`` when it is not registered (#13)."""
+        client = await self.stores.clients.get(client_id)
+        if client is None:
+            raise OAuthError("invalid_client", "unknown client_id; the client must register first")
+        return OAuthClient.of(client)
+
     async def validate_request(self, request: AuthorizationRequest) -> OAuthClient:
         """Check an authorization request and return its client.
 
         The consent page calls this before it shows anything, so it never shows (or redirects
         to) a request with an unregistered ``redirect_uri``. ``approve`` and ``deny`` call it too.
         """
-        client = await self.stores.clients.get(request.client_id)
-        if client is None:
-            raise OAuthError("invalid_client", "unknown client_id; the client must register first")
+        client = await self._registered_client(request.client_id)
         if not any(_same_redirect(r, request.redirect_uri) for r in client.redirect_uris):
             raise OAuthError("invalid_request", "redirect_uri is not registered for this client")
         if not request.code_challenge:
@@ -372,7 +379,7 @@ class AuthorizationServer:
         if request.code_challenge_method != CODE_CHALLENGE_METHOD:
             raise OAuthError("invalid_request", "only the S256 code_challenge_method is supported")
         self.resolve_resource(request.resource)
-        return OAuthClient.of(client)
+        return client
 
     async def deny(self, request: AuthorizationRequest) -> str:
         """The redirect URL that tells the client the user said no (RFC 6749 section 4.1.2.1)."""
@@ -426,6 +433,7 @@ class AuthorizationServer:
     async def _exchange_code(self, request: TokenRequest) -> TokenResponse:
         if not request.code or not request.code_verifier or not request.client_id:
             raise OAuthError("invalid_request", "code, code_verifier and client_id are required")
+        await self._registered_client(request.client_id)
         # Claim first, validate after: a code that fails any check below stays burned.
         record = await self.stores.codes.consume(hash_secret(request.code))
         if record is None or record.expires_at < self.now():
@@ -451,6 +459,8 @@ class AuthorizationServer:
     async def _exchange_refresh(self, request: TokenRequest) -> TokenResponse:
         if not request.refresh_token or not request.client_id:
             raise OAuthError("invalid_request", "refresh_token and client_id are required")
+        # Before the claim: if the client store fails here, the token is still unused.
+        await self._registered_client(request.client_id)
         now = self.now()
         token_hash = hash_secret(request.refresh_token)
         record = await self.stores.tokens.consume_refresh(token_hash, now)
@@ -508,10 +518,8 @@ class AuthorizationServer:
         space-separated list the client asks for; the user may approve fewer.
         """
         devices = self._devices()
-        found = await self.stores.clients.get(client_id)
-        if found is None:
-            raise OAuthError("invalid_client", "unknown client_id; the client must register first")
-        if GRANT_DEVICE_CODE not in OAuthClient.of(found).grant_types:
+        client = await self._registered_client(client_id)
+        if GRANT_DEVICE_CODE not in client.grant_types:
             raise OAuthError("unauthorized_client", "this client may not use the device grant")
         scopes = tuple(dict.fromkeys(scope.split()))
         unknown = [x for x in scopes if x not in self.config.scopes_supported]
@@ -548,7 +556,8 @@ class AuthorizationServer:
             interval=interval,
         )
 
-    async def _pending_device(self, user_code: str) -> DeviceRecord:
+    async def _pending_device(self, user_code: str) -> tuple[DeviceRecord, OAuthClient]:
+        """The undecided record of a user code and its client, which must still be registered."""
         record = await self._devices().get_by_user_code(normalize_user_code(user_code))
         if (
             record is None
@@ -556,7 +565,10 @@ class AuthorizationServer:
             or record.expires_at <= self.now()
         ):
             raise OAuthError("invalid_request", "unknown, expired or already decided code", 404)
-        return DeviceRecord.of(record)
+        client = await self.stores.clients.get(record.client_id)
+        if client is None:
+            raise OAuthError("invalid_request", "unknown, expired or already decided code", 404)
+        return DeviceRecord.of(record), OAuthClient.of(client)
 
     async def describe_device(self, user_code: str) -> DeviceRequest:
         """What the host's page shows after the user types a code: the client and what it asks.
@@ -565,12 +577,11 @@ class AuthorizationServer:
         their own device, also when the code came in ``verification_uri_complete`` (RFC 8628
         section 5.4). Raises ``OAuthError`` for an unknown, expired or already decided code.
         """
-        record = await self._pending_device(user_code)
-        client = await self.stores.clients.get(record.client_id)
+        record, client = await self._pending_device(user_code)
         return DeviceRequest(
             user_code=format_user_code(record.user_code),
             client_id=record.client_id,
-            client_name=client.client_name if client is not None else record.client_id,
+            client_name=client.client_name,
             scopes=record.scopes,
             resource=record.resource,
             expires_at=record.expires_at,
@@ -581,7 +592,7 @@ class AuthorizationServer:
 
         ``approval.scopes`` may be narrower than what the client asked for, never wider.
         """
-        record = await self._pending_device(user_code)
+        record, _ = await self._pending_device(user_code)
         scopes = self._check_scopes(approval.scopes)
         if record.scopes and not set(scopes) <= set(record.scopes):
             raise OAuthError("invalid_scope", "approved scopes are wider than the ones requested")
@@ -592,7 +603,7 @@ class AuthorizationServer:
 
     async def deny_device(self, user_code: str) -> None:
         """Deny the device with this user code. The client's next poll gets ``access_denied``."""
-        record = await self._pending_device(user_code)
+        record, _ = await self._pending_device(user_code)
         decision = DeviceDecision(DeviceStatus.DENIED)
         decided = await self._devices().decide(record.user_code, decision, self.now())
         if decided is None:
@@ -622,6 +633,7 @@ class AuthorizationServer:
         devices = self._devices()
         if not request.device_code or not request.client_id:
             raise OAuthError("invalid_request", "device_code and client_id are required")
+        await self._registered_client(request.client_id)
         now = self.now()
         device_hash = hash_secret(request.device_code)
         found = await devices.get(device_hash)
